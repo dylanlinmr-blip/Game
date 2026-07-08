@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Arcane Frontier</title>
+  <style>
+    :root {
+      --bg: #12151c;
+      --panel: #1b2330;
+      --panel-2: #101723;
+      --text: #d8e2f0;
+      --muted: #90a0bb;
+      --good: #7ee787;
+      --warn: #f2cc60;
+      --bad: #ff7b72;
+      --accent: #7aa2ff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Inter, Segoe UI, Roboto, system-ui, sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at top, #1d2637, var(--bg));
+    }
+
+    .wrap {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      min-height: 100vh;
+      gap: 12px;
+      padding: 12px;
+    }
+
+    .panel {
+      background: linear-gradient(180deg, var(--panel), var(--panel-2));
+      border: 1px solid #2a3953;
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+      overflow: auto;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.3rem;
+      letter-spacing: 0.5px;
+    }
+
+    .sub {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .section {
+      margin-top: 12px;
+      border-top: 1px solid #2a3953;
+      padding-top: 10px;
+    }
+
+    .resource-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      font-size: 0.92rem;
+    }
+
+    .chip {
+      background: #1f2c43;
+      border: 1px solid #2f456b;
+      border-radius: 8px;
+      padding: 5px 8px;
+    }
+
+    .btn-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    button {
+      border: 1px solid #345289;
+      background: #1d3157;
+      color: #e9f1ff;
+      border-radius: 8px;
+      padding: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.86rem;
+    }
+
+    button:hover { filter: brightness(1.1); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    #endTurnBtn {
+      width: 100%;
+      margin-top: 10px;
+      background: #235a3e;
+      border-color: #3c8861;
+      font-size: 0.95rem;
+      padding: 10px;
+    }
+
+    #canvasWrap {
+      position: relative;
+      min-height: 80vh;
+    }
+
+    canvas {
+      width: 100%;
+      height: calc(100vh - 24px);
+      background: #0d1118;
+      border: 1px solid #2a3953;
+      border-radius: 12px;
+      display: block;
+    }
+
+    .log {
+      max-height: 220px;
+      overflow: auto;
+      background: #0f1623;
+      border: 1px solid #2a3953;
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 0.85rem;
+      line-height: 1.35;
+    }
+
+    .good { color: var(--good); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--bad); }
+
+    .small { font-size: 0.82rem; color: var(--muted); }
+
+    @media (max-width: 1080px) {
+      .wrap {
+        grid-template-columns: 1fr;
+      }
+      canvas {
+        height: 62vh;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <aside class="panel">
+      <h1>Arcane Frontier</h1>
+      <p class="sub">Colonize the magical wilds, survive storms, and clear the map.</p>
+
+      <div class="section">
+        <strong>Turn <span id="turnEl">1</span></strong>
+        <div class="small" id="statusEl"></div>
+      </div>
+
+      <div class="section">
+        <strong>Resources</strong>
+        <div class="resource-grid" id="resourceGrid"></div>
+      </div>
+
+      <div class="section">
+        <strong>Actions</strong>
+        <div class="btn-row">
+          <button id="recruitScout">Recruit Scout</button>
+          <button id="recruitGatherer">Recruit Gatherer</button>
+          <button id="recruitSoldier">Recruit Soldier</button>
+          <button id="recruitSettler">Recruit Settler</button>
+        </div>
+        <button id="buildVillageBtn">Build Village (Settler)</button>
+        <button id="tradeBtn">Trade with Ally</button>
+        <button id="endTurnBtn">End Turn</button>
+      </div>
+
+      <div class="section">
+        <strong>Selected Tile / Unit</strong>
+        <div id="selectionEl" class="small">None</div>
+      </div>
+
+      <div class="section">
+        <strong>Event Log</strong>
+        <div class="log" id="logEl"></div>
+      </div>
+
+      <div class="section small">
+        <div>How to play:</div>
+        <ul>
+          <li>Click your unit, then click adjacent hexes to move.</li>
+          <li>Hexes are black until explored, and dim when empty.</li>
+          <li>Gatherers harvest resources from resource hexes.</li>
+          <li>Explore ruins for loot + technology.</li>
+          <li>Hostiles attack; allies occasionally appear for trade.</li>
+          <li>Win by exploring all hexes and defeating all hostiles.</li>
+        </ul>
+      </div>
+    </aside>
+
+    <main id="canvasWrap" class="panel">
+      <canvas id="gameCanvas" width="1400" height="950"></canvas>
+    </main>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const turnEl = document.getElementById('turnEl');
+    const statusEl = document.getElementById('statusEl');
+    const resourceGrid = document.getElementById('resourceGrid');
+    const selectionEl = document.getElementById('selectionEl');
+    const logEl = document.getElementById('logEl');
+
+    const recruitScoutBtn = document.getElementById('recruitScout');
+    const recruitGathererBtn = document.getElementById('recruitGatherer');
+    const recruitSoldierBtn = document.getElementById('recruitSoldier');
+    const recruitSettlerBtn = document.getElementById('recruitSettler');
+    const buildVillageBtn = document.getElementById('buildVillageBtn');
+    const tradeBtn = document.getElementById('tradeBtn');
+    const endTurnBtn = document.getElementById('endTurnBtn');
+
+    const HEX_SIZE = 36;
+    const MAP_RADIUS = 5; // 91 hexes
+    const ORIGIN_X = canvas.width / 2;
+    const ORIGIN_Y = canvas.height / 2;
+
+    const directions = [
+      [1, 0], [1, -1], [0, -1],
+      [-1, 0], [-1, 1], [0, 1]
+    ];
+
+    const terrainColors = {
+      plains: '#8cbf6f',
+      forest: '#4f8b4f',
+      mountain: '#8b7f7b',
+      swamp: '#557e6f',
+      desert: '#c7b16f',
+      tundra: '#9db0c9'
+    };
+
+    const terrainList = Object.keys(terrainColors);
+    const resourceTypes = ['food', 'wood', 'stone', 'iron', 'crystal', 'herbs'];
+
+    const game = {
+      turn: 1,
+      tech: 0,
+      map: new Map(),
+      units: [],
+      structures: [],
+      selectedUnitId: null,
+      selectedHex: null,
+      nextUnitId: 1,
+      weather: 'Calm Winds',
+      gameOver: false,
+      resources: {
+        food: 80,
+        wood: 70,
+        stone: 40,
+        iron: 20,
+        crystal: 10,
+        herbs: 15
+      }
+    };
+
+    function key(q, r) {
+      return `${q},${r}`;
+    }
+
+    function randomChoice(arr) {
+      return arr[Math.floor(Math.random() * arr.length)];
+    }
+
+    function randInt(min, max) {
+      return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    function log(message, cls = '') {
+      const div = document.createElement('div');
+      if (cls) div.className = cls;
+      div.textContent = message;
+      logEl.prepend(div);
+      while (logEl.children.length > 70) logEl.removeChild(logEl.lastChild);
+    }
+
+    function axialToPixel(q, r) {
+      const x = ORIGIN_X + HEX_SIZE * Math.sqrt(3) * (q + r / 2);
+      const y = ORIGIN_Y + HEX_SIZE * 1.5 * r;
+      return { x, y };
+    }
+
+    function pixelToAxial(x, y) {
+      const q = ((x - ORIGIN_X) * Math.sqrt(3) / 3 - (y - ORIGIN_Y) / 3) / HEX_SIZE;
+      const r = ((y - ORIGIN_Y) * 2 / 3) / HEX_SIZE;
+      return hexRound(q, r);
+    }
+
+    function hexRound(q, r) {
+      let x = q;
+      let z = r;
+      let y = -x - z;
+
+      let rx = Math.round(x);
+      let ry = Math.round(y);
+      let rz = Math.round(z);
+
+      const xDiff = Math.abs(rx - x);
+      const yDiff = Math.abs(ry - y);
+      const zDiff = Math.abs(rz - z);
+
+      if (xDiff > yDiff && xDiff > zDiff) {
+        rx = -ry - rz;
+      } else if (yDiff > zDiff) {
+        ry = -rx - rz;
+      } else {
+        rz = -rx - ry;
+      }
+      return { q: rx, r: rz };
+    }
+
+    function distance(a, b) {
+      return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
+    }
+
+    function neighbors(q, r) {
+      return directions
+        .map(([dq, dr]) => ({ q: q + dq, r: r + dr }))
+        .filter(h => game.map.has(key(h.q, h.r)));
+    }
+
+    function initMap() {
+      for (let q = -MAP_RADIUS; q <= MAP_RADIUS; q++) {
+        const r1 = Math.max(-MAP_RADIUS, -q - MAP_RADIUS);
+        const r2 = Math.min(MAP_RADIUS, -q + MAP_RADIUS);
+        for (let r = r1; r <= r2; r++) {
+          const terrain = randomChoice(terrainList);
+          const resourceChance = Math.random();
+          const resource = resourceChance < 0.58
+            ? randomChoice(resourceTypes)
+            : null;
+
+          game.map.set(key(q, r), {
+            q,
+            r,
+            explored: false,
+            terrain,
+            resource,
+            resourceAmount: resource ? randInt(25, 75) : 0,
+            ruin: Math.random() < 0.09,
+            ruinVisited: false
+          });
+        }
+      }
+
+      const center = game.map.get(key(0, 0));
+      center.explored = true;
+      center.resource = null;
+      center.ruin = false;
+
+      // Guarantee several ruins and hostile start points.
+      let forcedRuins = 0;
+      while (forcedRuins < 6) {
+        const tile = randomMapTile(t => distance(t, { q: 0, r: 0 }) > 2 && !t.ruin);
+        if (!tile) break;
+        tile.ruin = true;
+        forcedRuins++;
+      }
+    }
+
+    function randomMapTile(filterFn = null) {
+      const arr = Array.from(game.map.values());
+      const filtered = filterFn ? arr.filter(filterFn) : arr;
+      return filtered.length ? filtered[randInt(0, filtered.length - 1)] : null;
+    }
+
+    function addUnit(type, owner, q, r) {
+      const base = {
+        scout: { hp: 4, maxMoves: 2, atk: 1 },
+        gatherer: { hp: 5, maxMoves: 1, atk: 1 },
+        soldier: { hp: 8, maxMoves: 1, atk: 3 },
+        settler: { hp: 6, maxMoves: 1, atk: 1 },
+        raider: { hp: 6, maxMoves: 1, atk: 2 },
+        beast: { hp: 7, maxMoves: 1, atk: 3 },
+        ally: { hp: 6, maxMoves: 1, atk: 1 }
+      };
+
+      const b = base[type];
+      const unit = {
+        id: game.nextUnitId++,
+        type,
+        owner,
+        q,
+        r,
+        hp: b.hp,
+        maxHp: b.hp,
+        moves: b.maxMoves,
+        maxMoves: b.maxMoves,
+        atk: b.atk
+      };
+      game.units.push(unit);
+      return unit;
+    }
+
+    function setupGame() {
+      initMap();
+      game.structures.push({ type: 'village', q: 0, r: 0, hp: 20 });
+
+      addUnit('scout', 'player', 0, 0);
+      addUnit('gatherer', 'player', 0, 0);
+      addUnit('soldier', 'player', 0, 0);
+
+      for (let i = 0; i < 6; i++) {
+        const t = randomMapTile(tile => distance(tile, { q: 0, r: 0 }) > 3);
+        if (t) addUnit(Math.random() < 0.5 ? 'raider' : 'beast', 'hostile', t.q, t.r);
+      }
+
+      log('You founded your first village in the Arcane Frontier.', 'good');
+      log('Explore hexes, gather resources, survive magical weather, and clear the land.');
+
+      updateUI();
+      render();
+    }
+
+    function getUnitAt(q, r, owner = null) {
+      return game.units.find(u => u.q === q && u.r === r && (owner ? u.owner === owner : true));
+    }
+
+    function getUnitsAt(q, r) {
+      return game.units.filter(u => u.q === q && u.r === r);
+    }
+
+    function getVillageAt(q, r) {
+      return game.structures.find(s => s.type === 'village' && s.q === q && s.r === r);
+    }
+
+    function playerUnits() {
+      return game.units.filter(u => u.owner === 'player');
+    }
+
+    function hostileUnits() {
+      return game.units.filter(u => u.owner === 'hostile');
+    }
+
+    function allyUnits() {
+      return game.units.filter(u => u.owner === 'ally');
+    }
+
+    function canAfford(cost) {
+      return Object.entries(cost).every(([k, v]) => game.resources[k] >= v);
+    }
+
+    function spend(cost) {
+      Object.entries(cost).forEach(([k, v]) => game.resources[k] -= v);
+    }
+
+    function recruit(type) {
+      if (game.gameOver) return;
+      const costs = {
+        scout: { food: 12, wood: 8 },
+        gatherer: { food: 15, wood: 5 },
+        soldier: { food: 20, iron: 12, wood: 8 },
+        settler: { food: 30, wood: 20, stone: 20 }
+      };
+
+      const cost = costs[type];
+      if (!canAfford(cost)) {
+        log(`Not enough resources for ${type}.`, 'bad');
+        return;
+      }
+
+      const villages = game.structures.filter(s => s.type === 'village');
+      if (!villages.length) {
+        log('No village available to train units.', 'bad');
+        return;
+      }
+
+      spend(cost);
+      const v = villages[0];
+      addUnit(type, 'player', v.q, v.r);
+      log(`Recruited ${type} at the village.`);
+      updateUI();
+      render();
+    }
+
+    function buildVillage() {
+      if (game.gameOver) return;
+      const unit = game.units.find(u => u.id === game.selectedUnitId);
+      if (!unit || unit.owner !== 'player' || unit.type !== 'settler') {
+        log('Select a settler to build a village.', 'warn');
+        return;
+      }
+
+      if (getVillageAt(unit.q, unit.r)) {
+        log('A village already exists here.', 'warn');
+        return;
+      }
+
+      const cost = { wood: 30, stone: 30, crystal: 4 };
+      if (!canAfford(cost)) {
+        log('Need 30 wood, 30 stone, 4 crystal to build village.', 'bad');
+        return;
+      }
+
+      spend(cost);
+      game.structures.push({ type: 'village', q: unit.q, r: unit.r, hp: 20 });
+      game.units = game.units.filter(u => u.id !== unit.id);
+      game.selectedUnitId = null;
+      log('A new village has been founded!', 'good');
+      updateUI();
+      render();
+    }
+
+    function tradeWithAlly() {
+      if (game.gameOver) return;
+      const pUnit = game.units.find(u => u.id === game.selectedUnitId && u.owner === 'player');
+      if (!pUnit) {
+        log('Select your unit first.', 'warn');
+        return;
+      }
+
+      const ally = getUnitAt(pUnit.q, pUnit.r, 'ally');
+      if (!ally) {
+        log('No ally on this hex to trade with.', 'warn');
+        return;
+      }
+
+      const lootType = randomChoice(resourceTypes);
+      const amount = randInt(12, 30);
+      game.resources[lootType] += amount;
+      if (Math.random() < 0.35) game.tech += 1;
+      log(`Trade complete: +${amount} ${lootType}${Math.random() < 0.35 ? ' and +1 technology' : ''}.`, 'good');
+      ally.hp = 0; // ally leaves after trade
+      cleanupDeadUnits();
+      updateUI();
+      render();
+    }
+
+    function attemptMove(unit, q, r) {
+      if (unit.moves <= 0) {
+        log('This unit has no movement left this turn.', 'warn');
+        return;
+      }
+
+      const d = distance(unit, { q, r });
+      if (d !== 1) return;
+
+      const tile = game.map.get(key(q, r));
+      if (!tile) return;
+
+      const occupant = getUnitAt(q, r);
+      if (occupant && occupant.owner === 'player') {
+        return;
+      }
+
+      if (occupant && occupant.owner !== 'player') {
+        // Combat
+        occupant.hp -= unit.atk;
+        unit.hp -= Math.max(1, occupant.atk - 1);
+        unit.moves = 0;
+        log(`${capitalize(unit.type)} fights ${occupant.owner} ${occupant.type}!`, 'warn');
+        cleanupDeadUnits();
+      } else {
+        unit.q = q;
+        unit.r = r;
+        unit.moves -= 1;
+
+        if (!tile.explored) {
+          tile.explored = true;
+          log('A new hex has been explored.', 'good');
+        }
+
+        if (tile.ruin && !tile.ruinVisited) {
+          tile.ruinVisited = true;
+          game.tech += 1;
+          const lootRes = randomChoice(resourceTypes);
+          const lootAmt = randInt(15, 45);
+          game.resources[lootRes] += lootAmt;
+          log(`Ancient ruins discovered: +1 technology, +${lootAmt} ${lootRes}.`, 'good');
+        }
+
+        const ally = getUnitAt(q, r, 'ally');
+        if (ally) {
+          log('An allied traveler is here. Use Trade to exchange goods.', 'good');
+        }
+      }
+
+      updateUI();
+      render();
+    }
+
+    function cleanupDeadUnits() {
+      const before = game.units.length;
+      game.units = game.units.filter(u => u.hp > 0);
+      if (before !== game.units.length) {
+        log('Units were lost in conflict.', 'bad');
+      }
+    }
+
+    function gatherPhase() {
+      for (const u of playerUnits()) {
+        const tile = game.map.get(key(u.q, u.r));
+        if (!tile || !tile.resource || tile.resourceAmount <= 0) continue;
+        if (u.type !== 'gatherer') continue;
+
+        const amount = Math.min(randInt(6, 12) + game.tech, tile.resourceAmount);
+        game.resources[tile.resource] += amount;
+        tile.resourceAmount -= amount;
+
+        if (tile.resourceAmount <= 0) {
+          log(`${capitalize(tile.resource)} on this hex is depleted.`, 'warn');
+        } else {
+          log(`Gatherer collected ${amount} ${tile.resource}.`, 'good');
+        }
+      }
+
+      // Food upkeep
+      const upkeep = Math.max(2, Math.floor(playerUnits().length * 1.2));
+      game.resources.food -= upkeep;
+      if (game.resources.food < 0) {
+        game.resources.food = 0;
+        const starving = playerUnits()[0];
+        if (starving) {
+          starving.hp -= 2;
+          log('Food shortage! A unit suffers starvation damage.', 'bad');
+        }
+      }
+      cleanupDeadUnits();
+    }
+
+    function weatherPhase() {
+      const roll = Math.random();
+      if (roll < 0.42) {
+        game.weather = 'Calm Winds';
+        return;
+      }
+
+      if (roll < 0.75) {
+        game.weather = 'Hex Rain (bad weather)';
+        for (const u of game.units) {
+          u.moves = Math.max(0, u.moves - 1);
+        }
+        log('Hex Rain slows all wandering armies this turn.', 'warn');
+      } else if (roll < 0.95) {
+        game.weather = 'Arcane Storm';
+        for (const u of game.units) {
+          if (Math.random() < 0.4) u.hp -= 1;
+        }
+        cleanupDeadUnits();
+        log('Arcane Storm lashes the land with magical lightning.', 'bad');
+      } else {
+        game.weather = 'Cataclysmic Tempest';
+        for (const u of game.units) {
+          if (!getVillageAt(u.q, u.r)) u.hp -= 2;
+        }
+        cleanupDeadUnits();
+        const t = randomMapTile(tile => tile.resource && tile.resourceAmount > 10);
+        if (t) {
+          t.resourceAmount = Math.max(0, t.resourceAmount - 10);
+        }
+        log('Cataclysmic Tempest ravages open hexes and resources!', 'bad');
+      }
+    }
+
+    function hostilePhase() {
+      const players = playerUnits();
+      const villages = game.structures.filter(s => s.type === 'village');
+
+      for (const h of hostileUnits()) {
+        h.moves = h.maxMoves;
+
+        const targets = [
+          ...players.map(u => ({ q: u.q, r: u.r, unit: u })),
+          ...villages.map(v => ({ q: v.q, r: v.r, village: v }))
+        ];
+
+        if (!targets.length) break;
+
+        let nearest = targets[0];
+        let best = distance(h, nearest);
+        for (const t of targets) {
+          const d = distance(h, t);
+          if (d < best) {
+            best = d;
+            nearest = t;
+          }
+        }
+
+        if (best <= 1) {
+          const victimUnit = getUnitAt(nearest.q, nearest.r, 'player');
+          if (victimUnit) {
+            victimUnit.hp -= h.atk;
+            h.hp -= Math.max(1, victimUnit.atk - 1);
+            log(`Hostile ${h.type} attacks your ${victimUnit.type}!`, 'bad');
+          } else {
+            const village = getVillageAt(nearest.q, nearest.r);
+            if (village) {
+              village.hp -= h.atk;
+              log('A hostile force raids one of your villages!', 'bad');
+            }
+          }
+          continue;
+        }
+
+        let bestStep = null;
+        let bestDist = best;
+        for (const n of neighbors(h.q, h.r)) {
+          const blocker = getUnitAt(n.q, n.r, 'hostile');
+          if (blocker) continue;
+          const d = distance(n, nearest);
+          if (d < bestDist) {
+            bestDist = d;
+            bestStep = n;
+          }
+        }
+
+        if (bestStep) {
+          h.q = bestStep.q;
+          h.r = bestStep.r;
+        }
+      }
+
+      cleanupDeadUnits();
+      game.structures = game.structures.filter(s => s.hp > 0);
+    }
+
+    function allyPhase() {
+      // Move allies randomly
+      for (const a of allyUnits()) {
+        const opts = neighbors(a.q, a.r);
+        if (opts.length) {
+          const step = randomChoice(opts);
+          if (!getUnitAt(step.q, step.r, 'hostile') && !getUnitAt(step.q, step.r, 'ally')) {
+            a.q = step.q;
+            a.r = step.r;
+          }
+        }
+      }
+
+      // Spawn chance
+      if (Math.random() < 0.28 && allyUnits().length < 3) {
+        const spawn = randomMapTile(t => t.explored && distance(t, { q: 0, r: 0 }) > 1 && !getUnitAt(t.q, t.r));
+        if (spawn) {
+          addUnit('ally', 'ally', spawn.q, spawn.r);
+          log('A wandering allied envoy has arrived. Meet them to trade.', 'good');
+        }
+      }
+    }
+
+    function spawnNewHostiles() {
+      if (Math.random() < 0.35) {
+        const spawn = randomMapTile(t => distance(t, { q: 0, r: 0 }) > 3 && !getUnitAt(t.q, t.r));
+        if (spawn) {
+          addUnit(Math.random() < 0.5 ? 'raider' : 'beast', 'hostile', spawn.q, spawn.r);
+          log('Hostile creatures gather in the wilds.', 'bad');
+        }
+      }
+    }
+
+    function resetPlayerMovement() {
+      for (const u of playerUnits()) {
+        u.moves = u.maxMoves;
+      }
+    }
+
+    function exploreProgress() {
+      const total = game.map.size;
+      let explored = 0;
+      for (const t of game.map.values()) if (t.explored) explored++;
+      return { explored, total, pct: Math.floor((explored / total) * 100) };
+    }
+
+    function checkGameState() {
+      if (!playerUnits().length && !game.structures.length) {
+        game.gameOver = true;
+        statusEl.innerHTML = '<span class="bad">Defeat: your expedition has fallen.</span>';
+        log('Defeat. No units or villages remain.', 'bad');
+        return;
+      }
+
+      const progress = exploreProgress();
+      const hostilesLeft = hostileUnits().length;
+      if (progress.explored === progress.total && hostilesLeft === 0) {
+        game.gameOver = true;
+        statusEl.innerHTML = '<span class="good">Victory! The map is fully cleared.</span>';
+        log('Victory! You explored every hex and eliminated all hostiles.', 'good');
+      }
+    }
+
+    function endTurn() {
+      if (game.gameOver) return;
+
+      gatherPhase();
+      weatherPhase();
+      hostilePhase();
+      allyPhase();
+      spawnNewHostiles();
+
+      game.turn++;
+      resetPlayerMovement();
+      checkGameState();
+      updateUI();
+      render();
+    }
+
+    function drawHex(x, y, size, fill, stroke = '#243041', lineWidth = 1.3) {
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const angle = Math.PI / 180 * (60 * i - 30);
+        const px = x + size * Math.cos(angle);
+        const py = y + size * Math.sin(angle);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.lineWidth = lineWidth;
+      ctx.strokeStyle = stroke;
+      ctx.stroke();
+    }
+
+    function drawMap() {
+      for (const tile of game.map.values()) {
+        const { x, y } = axialToPixel(tile.q, tile.r);
+
+        const hasPlayer = !!getUnitAt(tile.q, tile.r, 'player') || !!getVillageAt(tile.q, tile.r);
+
+        let fill;
+        if (!tile.explored) {
+          fill = '#050608';
+        } else if (!hasPlayer) {
+          fill = '#1a1f2a'; // explored but dark unless occupied
+        } else {
+          fill = terrainColors[tile.terrain] || '#789';
+        }
+
+        drawHex(x, y, HEX_SIZE, fill, '#2d3748');
+
+        if (tile.explored && hasPlayer) {
+          if (tile.resource && tile.resourceAmount > 0) {
+            ctx.fillStyle = '#e8f0ff';
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(tile.resource[0].toUpperCase(), x, y + 4);
+          }
+          if (tile.ruin && !tile.ruinVisited) {
+            ctx.fillStyle = '#f2cc60';
+            ctx.font = 'bold 14px sans-serif';
+            ctx.fillText('⌂', x, y - 10);
+          }
+        } else if (tile.explored && tile.ruin && !tile.ruinVisited && Math.random() < 0.015) {
+          // tiny flicker hint on dark explored ruins
+          ctx.fillStyle = 'rgba(242,204,96,0.25)';
+          ctx.beginPath();
+          ctx.arc(x, y, 6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    function drawStructures() {
+      for (const s of game.structures) {
+        const tile = game.map.get(key(s.q, s.r));
+        if (!tile?.explored) continue;
+
+        const { x, y } = axialToPixel(s.q, s.r);
+        ctx.fillStyle = '#9fd3ff';
+        ctx.beginPath();
+        ctx.moveTo(x - 9, y + 7);
+        ctx.lineTo(x, y - 11);
+        ctx.lineTo(x + 9, y + 7);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#132031';
+        ctx.fillRect(x - 5, y + 3, 10, 7);
+      }
+    }
+
+    function drawUnits() {
+      for (const u of game.units) {
+        const tile = game.map.get(key(u.q, u.r));
+        if (!tile?.explored) continue;
+
+        const { x, y } = axialToPixel(u.q, u.r);
+        let color = '#ffffff';
+        if (u.owner === 'player') color = '#7ee787';
+        if (u.owner === 'hostile') color = '#ff7b72';
+        if (u.owner === 'ally') color = '#7aa2ff';
+
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x, y, 9, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (u.owner === 'player' && u.id === game.selectedUnitId) {
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(x, y, 12, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        ctx.fillStyle = '#0a0f18';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        const label = u.type[0].toUpperCase();
+        ctx.fillText(label, x, y + 3);
+      }
+    }
+
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawMap();
+      drawStructures();
+      drawUnits();
+    }
+
+    function updateSelectionInfo() {
+      const unit = game.units.find(u => u.id === game.selectedUnitId);
+      const hex = game.selectedHex;
+      const bits = [];
+
+      if (unit) {
+        bits.push(`Unit: ${unit.owner} ${unit.type} (HP ${unit.hp}/${unit.maxHp}, Moves ${unit.moves}/${unit.maxMoves}, ATK ${unit.atk}) @ ${unit.q},${unit.r}`);
+      }
+
+      if (hex) {
+        const tile = game.map.get(key(hex.q, hex.r));
+        if (tile) {
+          bits.push(`Hex ${hex.q},${hex.r} - ${tile.terrain}${tile.resource ? ', ' + tile.resource + ' (' + tile.resourceAmount + ')' : ''}${tile.ruin && !tile.ruinVisited ? ', ruin' : ''}${tile.explored ? '' : ', unexplored'}`);
+        }
+      }
+
+      selectionEl.textContent = bits.length ? bits.join(' | ') : 'None';
+    }
+
+    function updateUI() {
+      const progress = exploreProgress();
+      turnEl.textContent = game.turn;
+
+      const hostiles = hostileUnits().length;
+      const villages = game.structures.filter(s => s.type === 'village').length;
+      statusEl.innerHTML = `Weather: <strong>${game.weather}</strong><br/>Explored: ${progress.explored}/${progress.total} (${progress.pct}%) | Hostiles: ${hostiles} | Villages: ${villages} | Tech: ${game.tech}`;
+
+      const entries = [
+        ['Food', game.resources.food],
+        ['Wood', game.resources.wood],
+        ['Stone', game.resources.stone],
+        ['Iron', game.resources.iron],
+        ['Crystal', game.resources.crystal],
+        ['Herbs', game.resources.herbs]
+      ];
+
+      resourceGrid.innerHTML = entries
+        .map(([k, v]) => `<div class="chip">${k}: <strong>${Math.max(0, Math.floor(v))}</strong></div>`)
+        .join('');
+
+      updateSelectionInfo();
+    }
+
+    function capitalize(str) {
+      return str.charAt(0).toUpperCase() + str.slice(1);
+    }
+
+    canvas.addEventListener('click', (event) => {
+      if (game.gameOver) return;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const x = (event.clientX - rect.left) * scaleX;
+      const y = (event.clientY - rect.top) * scaleY;
+      const hex = pixelToAxial(x, y);
+
+      if (!game.map.has(key(hex.q, hex.r))) return;
+      game.selectedHex = hex;
+
+      const clickedPlayer = getUnitAt(hex.q, hex.r, 'player');
+      if (clickedPlayer) {
+        game.selectedUnitId = clickedPlayer.id;
+        updateUI();
+        render();
+        return;
+      }
+
+      const selected = game.units.find(u => u.id === game.selectedUnitId && u.owner === 'player');
+      if (selected) {
+        attemptMove(selected, hex.q, hex.r);
+      }
+
+      updateUI();
+      render();
+    });
+
+    recruitScoutBtn.addEventListener('click', () => recruit('scout'));
+    recruitGathererBtn.addEventListener('click', () => recruit('gatherer'));
+    recruitSoldierBtn.addEventListener('click', () => recruit('soldier'));
+    recruitSettlerBtn.addEventListener('click', () => recruit('settler'));
+    buildVillageBtn.addEventListener('click', buildVillage);
+    tradeBtn.addEventListener('click', tradeWithAlly);
+    endTurnBtn.addEventListener('click', endTurn);
+
+    setupGame();
+  </script>
+</body>
+</html>
