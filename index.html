@@ -110,6 +110,65 @@
       min-height: 80vh;
     }
 
+    .action-popup {
+      position: absolute;
+      z-index: 8;
+      min-width: 260px;
+      max-width: 360px;
+      background: rgba(11, 17, 27, 0.95);
+      border: 1px solid #47669a;
+      border-radius: 10px;
+      padding: 10px;
+      box-shadow: 0 12px 26px rgba(0,0,0,0.45);
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-6px);
+      transition: opacity 130ms ease, transform 130ms ease;
+    }
+
+    .action-popup.show {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+
+    .announcement-panel {
+      position: absolute;
+      top: 18px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-8px);
+      background: rgba(9, 14, 22, 0.93);
+      border: 1px solid #36507f;
+      border-radius: 10px;
+      padding: 10px 14px;
+      min-width: 340px;
+      max-width: 76%;
+      color: #e5efff;
+      z-index: 5;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 220ms ease, transform 220ms ease;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+    }
+
+    .announcement-panel.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .announcement-title {
+      font-size: 0.82rem;
+      letter-spacing: 0.9px;
+      text-transform: uppercase;
+      color: #8fb4ff;
+      margin-bottom: 4px;
+    }
+
+    .announcement-line {
+      font-size: 0.9rem;
+      line-height: 1.35;
+    }
+
     canvas {
       width: 100%;
       height: calc(100vh - 24px);
@@ -117,6 +176,7 @@
       border: 1px solid #2a3953;
       border-radius: 12px;
       display: block;
+      cursor: grab;
     }
 
     .log {
@@ -164,13 +224,6 @@
 
       <div class="section">
         <strong>Actions</strong>
-        <div class="btn-row">
-          <button id="recruitScout">Recruit Scout</button>
-          <button id="recruitGatherer">Recruit Gatherer</button>
-          <button id="recruitSoldier">Recruit Soldier</button>
-          <button id="recruitSettler">Recruit Settler</button>
-        </div>
-        <button id="buildVillageBtn">Build Village (Settler)</button>
         <button id="tradeBtn">Trade with Ally</button>
         <button id="endTurnBtn">End Turn</button>
       </div>
@@ -178,6 +231,8 @@
       <div class="section">
         <strong>Selected Tile / Unit</strong>
         <div id="selectionEl" class="small">None</div>
+        <div id="unitOptionsEl" class="small" style="margin-top:8px; color:#b7c8e7;">Click a unit to view its options.</div>
+        <div id="contextActionsEl" class="small" style="margin-top:8px; color:#d5e3fb;">Click a village for recruit options, or an explored hex for build options.</div>
       </div>
 
       <div class="section">
@@ -188,9 +243,9 @@
       <div class="section small">
         <div>How to play:</div>
         <ul>
-          <li>Click your unit, then click adjacent hexes to move.</li>
+          <li>Drag the map to pan. Click your unit, then click adjacent hexes to move.</li>
           <li>Hexes are black until explored, and dim when empty.</li>
-          <li>Gatherers harvest resources from resource hexes.</li>
+          <li>Click a village for recruit options; click an explored hex for build options.</li>
           <li>Explore ruins for loot + technology.</li>
           <li>Hostiles attack; allies occasionally appear for trade.</li>
           <li>Win by exploring all hexes and defeating all hostiles.</li>
@@ -199,6 +254,12 @@
     </aside>
 
     <main id="canvasWrap" class="panel">
+      <div id="turnAnnouncement" class="announcement-panel">
+        <div class="announcement-title">Turn Report</div>
+        <div id="announcementLine1" class="announcement-line"></div>
+        <div id="announcementLine2" class="announcement-line"></div>
+      </div>
+      <div id="actionPopup" class="action-popup"></div>
       <canvas id="gameCanvas" width="1400" height="950"></canvas>
     </main>
   </div>
@@ -211,36 +272,56 @@
     const statusEl = document.getElementById('statusEl');
     const resourceGrid = document.getElementById('resourceGrid');
     const selectionEl = document.getElementById('selectionEl');
+    const unitOptionsEl = document.getElementById('unitOptionsEl');
+    const contextActionsEl = document.getElementById('contextActionsEl');
+    const actionPopupEl = document.getElementById('actionPopup');
+    const canvasWrapEl = document.getElementById('canvasWrap');
     const logEl = document.getElementById('logEl');
+    const turnAnnouncementEl = document.getElementById('turnAnnouncement');
+    const announcementLine1El = document.getElementById('announcementLine1');
+    const announcementLine2El = document.getElementById('announcementLine2');
+    let announcementHideTimer = null;
 
-    const recruitScoutBtn = document.getElementById('recruitScout');
-    const recruitGathererBtn = document.getElementById('recruitGatherer');
-    const recruitSoldierBtn = document.getElementById('recruitSoldier');
-    const recruitSettlerBtn = document.getElementById('recruitSettler');
-    const buildVillageBtn = document.getElementById('buildVillageBtn');
     const tradeBtn = document.getElementById('tradeBtn');
     const endTurnBtn = document.getElementById('endTurnBtn');
 
     const HEX_SIZE = 36;
-    const MAP_RADIUS = 5; // 91 hexes
+    const MAP_RADIUS = 12; // large map: requires camera panning
     const ORIGIN_X = canvas.width / 2;
     const ORIGIN_Y = canvas.height / 2;
+
+    const camera = {
+      x: 0,
+      y: 0,
+      minX: 0,
+      maxX: 0,
+      minY: 0,
+      maxY: 0,
+      isDragging: false,
+      dragMoved: false,
+      startMouseX: 0,
+      startMouseY: 0,
+      startCamX: 0,
+      startCamY: 0
+    };
 
     const directions = [
       [1, 0], [1, -1], [0, -1],
       [-1, 0], [-1, 1], [0, 1]
     ];
 
-    const terrainColors = {
-      plains: '#8cbf6f',
-      forest: '#4f8b4f',
-      mountain: '#8b7f7b',
-      swamp: '#557e6f',
-      desert: '#c7b16f',
-      tundra: '#9db0c9'
+    const terrainDefs = {
+      grass: { color: '#2f7e39', detail: '#77c781', min: 24, max: 70 }
     };
 
-    const terrainList = Object.keys(terrainColors);
+    const resourceWeights = [
+      { type: 'food', weight: 34, min: 24, max: 72 },
+      { type: 'wood', weight: 26, min: 20, max: 66 },
+      { type: 'stone', weight: 17, min: 16, max: 54 },
+      { type: 'iron', weight: 11, min: 12, max: 42 },
+      { type: 'herbs', weight: 8, min: 12, max: 40 },
+      { type: 'crystal', weight: 4, min: 8, max: 28 }
+    ];
     const resourceTypes = ['food', 'wood', 'stone', 'iron', 'crystal', 'herbs'];
 
     const game = {
@@ -254,6 +335,10 @@
       nextUnitId: 1,
       weather: 'Calm Winds',
       gameOver: false,
+      animTime: 0,
+      weatherVisuals: {
+        tornadoes: []
+      },
       resources: {
         food: 80,
         wood: 70,
@@ -263,6 +348,8 @@
         herbs: 15
       }
     };
+
+    let animationLoopStarted = false;
 
     function key(q, r) {
       return `${q},${r}`;
@@ -276,6 +363,30 @@
       return Math.floor(Math.random() * (max - min + 1)) + min;
     }
 
+    function createTerrainNode() {
+      return { terrain: 'grass' };
+    }
+
+    function assignResourceByTerrain(tile) {
+      const totalWeight = resourceWeights.reduce((sum, item) => sum + item.weight, 0);
+      let roll = Math.random() * totalWeight;
+      let picked = resourceWeights[0];
+      for (const item of resourceWeights) {
+        roll -= item.weight;
+        if (roll <= 0) {
+          picked = item;
+          break;
+        }
+      }
+
+      tile.resource = picked.type;
+      tile.resourceAmount = randInt(picked.min, picked.max);
+    }
+
+    function smoothBiomes() {
+      // Map is intentionally uniform grass now.
+    }
+
     function log(message, cls = '') {
       const div = document.createElement('div');
       if (cls) div.className = cls;
@@ -285,14 +396,16 @@
     }
 
     function axialToPixel(q, r) {
-      const x = ORIGIN_X + HEX_SIZE * Math.sqrt(3) * (q + r / 2);
-      const y = ORIGIN_Y + HEX_SIZE * 1.5 * r;
+      const x = ORIGIN_X + HEX_SIZE * Math.sqrt(3) * (q + r / 2) + camera.x;
+      const y = ORIGIN_Y + HEX_SIZE * 1.5 * r + camera.y;
       return { x, y };
     }
 
     function pixelToAxial(x, y) {
-      const q = ((x - ORIGIN_X) * Math.sqrt(3) / 3 - (y - ORIGIN_Y) / 3) / HEX_SIZE;
-      const r = ((y - ORIGIN_Y) * 2 / 3) / HEX_SIZE;
+      const worldX = x - camera.x;
+      const worldY = y - camera.y;
+      const q = ((worldX - ORIGIN_X) * Math.sqrt(3) / 3 - (worldY - ORIGIN_Y) / 3) / HEX_SIZE;
+      const r = ((worldY - ORIGIN_Y) * 2 / 3) / HEX_SIZE;
       return hexRound(q, r);
     }
 
@@ -323,40 +436,65 @@
       return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
     }
 
+    function isShoreTile(tile) {
+      return Math.max(Math.abs(tile.q), Math.abs(tile.r), Math.abs(-tile.q - tile.r)) === MAP_RADIUS;
+    }
+
     function neighbors(q, r) {
       return directions
         .map(([dq, dr]) => ({ q: q + dq, r: r + dr }))
         .filter(h => game.map.has(key(h.q, h.r)));
     }
 
+    function recalculateVisibility() {
+      for (const t of game.map.values()) {
+        t.visible = false;
+      }
+
+      const revealFrom = (q, r, range) => {
+        for (const tile of game.map.values()) {
+          if (distance({ q, r }, tile) <= range) {
+            tile.visible = true;
+            tile.explored = true;
+          }
+        }
+      };
+
+      for (const u of playerUnits()) {
+        const range = u.type === 'scout' ? 2 : 0;
+        revealFrom(u.q, u.r, range);
+      }
+
+      for (const s of game.structures) {
+        if (s.type === 'village') revealFrom(s.q, s.r, 1);
+      }
+    }
+
     function initMap() {
+      updateCameraBounds();
+
       for (let q = -MAP_RADIUS; q <= MAP_RADIUS; q++) {
         const r1 = Math.max(-MAP_RADIUS, -q - MAP_RADIUS);
         const r2 = Math.min(MAP_RADIUS, -q + MAP_RADIUS);
         for (let r = r1; r <= r2; r++) {
-          const terrain = randomChoice(terrainList);
-          const resourceChance = Math.random();
-          const resource = resourceChance < 0.58
-            ? randomChoice(resourceTypes)
-            : null;
+          const node = createTerrainNode();
 
           game.map.set(key(q, r), {
             q,
             r,
             explored: false,
-            terrain,
-            resource,
-            resourceAmount: resource ? randInt(25, 75) : 0,
+            visible: false,
+            terrain: node.terrain,
+            resource: null,
+            resourceAmount: 0,
             ruin: Math.random() < 0.09,
             ruinVisited: false
           });
         }
       }
 
-      const center = game.map.get(key(0, 0));
-      center.explored = true;
-      center.resource = null;
-      center.ruin = false;
+      smoothBiomes();
+      for (const tile of game.map.values()) assignResourceByTerrain(tile);
 
       // Guarantee several ruins and hostile start points.
       let forcedRuins = 0;
@@ -368,6 +506,20 @@
       }
     }
 
+    function updateCameraBounds() {
+      const mapHalfWidth = HEX_SIZE * Math.sqrt(3) * MAP_RADIUS * 1.5 + HEX_SIZE * 2;
+      const mapHalfHeight = HEX_SIZE * 1.5 * MAP_RADIUS + HEX_SIZE * 2;
+      const maxPanX = Math.max(0, mapHalfWidth - canvas.width / 2);
+      const maxPanY = Math.max(0, mapHalfHeight - canvas.height / 2);
+
+      camera.minX = -maxPanX;
+      camera.maxX = maxPanX;
+      camera.minY = -maxPanY;
+      camera.maxY = maxPanY;
+      camera.x = Math.max(camera.minX, Math.min(camera.maxX, camera.x));
+      camera.y = Math.max(camera.minY, Math.min(camera.maxY, camera.y));
+    }
+
     function randomMapTile(filterFn = null) {
       const arr = Array.from(game.map.values());
       const filtered = filterFn ? arr.filter(filterFn) : arr;
@@ -377,9 +529,12 @@
     function addUnit(type, owner, q, r) {
       const base = {
         scout: { hp: 4, maxMoves: 2, atk: 1 },
-        gatherer: { hp: 5, maxMoves: 1, atk: 1 },
+        civilian: { hp: 6, maxMoves: 1, atk: 1 },
         soldier: { hp: 8, maxMoves: 1, atk: 3 },
-        settler: { hp: 6, maxMoves: 1, atk: 1 },
+        archer: { hp: 7, maxMoves: 1, atk: 4 },
+        ranger: { hp: 9, maxMoves: 2, atk: 3 },
+        defender: { hp: 16, maxMoves: 1, atk: 2 },
+        builder: { hp: 6, maxMoves: 1, atk: 1 },
         raider: { hp: 6, maxMoves: 1, atk: 2 },
         beast: { hp: 7, maxMoves: 1, atk: 3 },
         ally: { hp: 6, maxMoves: 1, atk: 1 }
@@ -404,22 +559,42 @@
 
     function setupGame() {
       initMap();
-      game.structures.push({ type: 'village', q: 0, r: 0, hp: 20 });
 
-      addUnit('scout', 'player', 0, 0);
-      addUnit('gatherer', 'player', 0, 0);
-      addUnit('soldier', 'player', 0, 0);
+      const shoreStart = randomMapTile(tile => isShoreTile(tile));
+      const startQ = shoreStart ? shoreStart.q : 0;
+      const startR = shoreStart ? shoreStart.r : 0;
+      const startTile = game.map.get(key(startQ, startR));
+      if (startTile) {
+        startTile.explored = true;
+        startTile.resource = null;
+        startTile.resourceAmount = 0;
+      }
+
+      for (const n of neighbors(startQ, startR)) {
+        const t = game.map.get(key(n.q, n.r));
+        if (t) t.explored = true;
+      }
+
+      game.structures.push({ type: 'village', q: startQ, r: startR, hp: 20 });
+
+      addUnit('scout', 'player', startQ, startR);
+      addUnit('civilian', 'player', startQ, startR);
+      addUnit('soldier', 'player', startQ, startR);
 
       for (let i = 0; i < 6; i++) {
-        const t = randomMapTile(tile => distance(tile, { q: 0, r: 0 }) > 3);
+        const t = randomMapTile(tile => isShoreTile(tile) && !getUnitAt(tile.q, tile.r) && distance(tile, { q: startQ, r: startR }) > 3);
         if (t) addUnit(Math.random() < 0.5 ? 'raider' : 'beast', 'hostile', t.q, t.r);
       }
 
-      log('You founded your first village in the Arcane Frontier.', 'good');
+      buildWeatherVisuals();
+      recalculateVisibility();
+      log('Your expedition lands on the shore of the Arcane Frontier.', 'good');
       log('Explore hexes, gather resources, survive magical weather, and clear the land.');
 
       updateUI();
       render();
+      startAnimationLoop();
+      showTurnAnnouncement({ intro: true });
     }
 
     function getUnitAt(q, r, owner = null) {
@@ -432,6 +607,14 @@
 
     function getVillageAt(q, r) {
       return game.structures.find(s => s.type === 'village' && s.q === q && s.r === r);
+    }
+
+    function getStructureAt(q, r, type = null) {
+      return game.structures.find(s => s.q === q && s.r === r && (type ? s.type === type : true));
+    }
+
+    function structureCount(type) {
+      return game.structures.filter(s => s.type === type).length;
     }
 
     function playerUnits() {
@@ -454,59 +637,134 @@
       Object.entries(cost).forEach(([k, v]) => game.resources[k] -= v);
     }
 
-    function recruit(type) {
+    function recruit(type, sourceHex = null) {
       if (game.gameOver) return;
       const costs = {
         scout: { food: 12, wood: 8 },
-        gatherer: { food: 15, wood: 5 },
+        civilian: { food: 14, wood: 6 },
         soldier: { food: 20, iron: 12, wood: 8 },
-        settler: { food: 30, wood: 20, stone: 20 }
+        builder: { food: 26, wood: 18, stone: 12 },
+        archer: { food: 18, wood: 16, iron: 10 },
+        ranger: { food: 24, wood: 14, herbs: 8, iron: 8 },
+        defender: { food: 28, wood: 14, stone: 18, iron: 16 }
+      };
+
+      const trainingSiteByUnit = {
+        scout: 'village',
+        civilian: 'village',
+        soldier: 'village',
+        builder: 'village',
+        archer: 'barracks',
+        ranger: 'barracks',
+        defender: 'barracks'
       };
 
       const cost = costs[type];
+      if (!cost) return;
       if (!canAfford(cost)) {
         log(`Not enough resources for ${type}.`, 'bad');
         return;
       }
 
-      const villages = game.structures.filter(s => s.type === 'village');
-      if (!villages.length) {
-        log('No village available to train units.', 'bad');
+      const requiredSite = trainingSiteByUnit[type] || 'village';
+      let source = null;
+
+      if (sourceHex) {
+        source = getStructureAt(sourceHex.q, sourceHex.r, requiredSite);
+        if (!source) {
+          log(`${capitalize(type)} training requires selecting a ${requiredSite} tile.`, 'warn');
+          return;
+        }
+      } else {
+        source = game.structures.find(s => s.type === requiredSite);
+      }
+
+      if (!source) {
+        log(`No ${requiredSite} available to train ${type}.`, 'bad');
         return;
       }
 
       spend(cost);
-      const v = villages[0];
-      addUnit(type, 'player', v.q, v.r);
-      log(`Recruited ${type} at the village.`);
+      addUnit(type, 'player', source.q, source.r);
+      recalculateVisibility();
+      log(`${capitalize(type)} trained at the ${requiredSite}.`, 'good');
       updateUI();
       render();
     }
 
-    function buildVillage() {
+    function buildStructure(type) {
       if (game.gameOver) return;
-      const unit = game.units.find(u => u.id === game.selectedUnitId);
-      if (!unit || unit.owner !== 'player' || unit.type !== 'settler') {
-        log('Select a settler to build a village.', 'warn');
+      if (!game.selectedHex) {
+        log('Click an explored hex first to build there.', 'warn');
         return;
       }
 
-      if (getVillageAt(unit.q, unit.r)) {
+      const costs = {
+        village: { wood: 30, stone: 30, crystal: 4 },
+        farm: { wood: 16, stone: 6 },
+        wall: { wood: 10, stone: 18 },
+        archer_tower: { wood: 22, stone: 18, iron: 8 },
+        port: { wood: 30, stone: 10 },
+        lumber_mill: { wood: 20, stone: 12 },
+        quarry: { wood: 14, stone: 14, iron: 4 },
+        barracks: { wood: 26, stone: 18, iron: 12 }
+      };
+
+      const hpByType = {
+        village: 20,
+        farm: 12,
+        wall: 16,
+        archer_tower: 14,
+        port: 14,
+        lumber_mill: 13,
+        quarry: 13,
+        barracks: 18
+      };
+
+      const labels = {
+        village: 'village',
+        farm: 'farm',
+        wall: 'wall',
+        archer_tower: 'archer tower',
+        port: 'port',
+        lumber_mill: 'lumber mill',
+        quarry: 'quarry',
+        barracks: 'barracks'
+      };
+
+      const cost = costs[type];
+      if (!cost) return;
+      if (!canAfford(cost)) {
+        log(`Not enough resources to build a ${labels[type]}.`, 'bad');
+        return;
+      }
+
+      const target = game.selectedHex;
+      const tile = game.map.get(key(target.q, target.r));
+      if (!tile || !tile.explored) {
+        log('You can only build on explored hexes.', 'warn');
+        return;
+      }
+
+      if (type === 'village' && getVillageAt(target.q, target.r)) {
         log('A village already exists here.', 'warn');
         return;
       }
 
-      const cost = { wood: 30, stone: 30, crystal: 4 };
-      if (!canAfford(cost)) {
-        log('Need 30 wood, 30 stone, 4 crystal to build village.', 'bad');
+      if (type === 'port' && !isShoreTile(tile)) {
+        log('Ports must be built on shore hexes.', 'warn');
+        return;
+      }
+
+      if (getStructureAt(target.q, target.r, type)) {
+        log(`This tile already has a ${labels[type]}.`, 'warn');
         return;
       }
 
       spend(cost);
-      game.structures.push({ type: 'village', q: unit.q, r: unit.r, hp: 20 });
-      game.units = game.units.filter(u => u.id !== unit.id);
-      game.selectedUnitId = null;
-      log('A new village has been founded!', 'good');
+      game.structures.push({ type, q: target.q, r: target.r, hp: hpByType[type] });
+      log(`Built a ${labels[type]}.`, 'good');
+      recalculateVisibility();
       updateUI();
       render();
     }
@@ -585,6 +843,7 @@
         }
       }
 
+      recalculateVisibility();
       updateUI();
       render();
     }
@@ -597,20 +856,44 @@
       }
     }
 
+    function structureProductionPhase() {
+      const farms = structureCount('farm');
+      const ports = structureCount('port');
+      const mills = structureCount('lumber_mill');
+      const quarries = structureCount('quarry');
+
+      // Increased output so production buildings generate resources faster.
+      const farmFood = farms * 14;
+      const portFood = ports * 6;
+      const portWood = ports * 4;
+      const millWood = mills * 10;
+      const quarryStone = quarries * 10;
+
+      if (farmFood) game.resources.food += farmFood;
+      if (portFood) game.resources.food += portFood;
+      if (portWood) game.resources.wood += portWood;
+      if (millWood) game.resources.wood += millWood;
+      if (quarryStone) game.resources.stone += quarryStone;
+
+      if (farms || ports || mills || quarries) {
+        log(`Production surge: +${farmFood + portFood} food, +${millWood + portWood} wood, +${quarryStone} stone.`, 'good');
+      }
+    }
+
     function gatherPhase() {
       for (const u of playerUnits()) {
         const tile = game.map.get(key(u.q, u.r));
         if (!tile || !tile.resource || tile.resourceAmount <= 0) continue;
-        if (u.type !== 'gatherer') continue;
+        if (u.type !== 'civilian') continue;
 
-        const amount = Math.min(randInt(6, 12) + game.tech, tile.resourceAmount);
+        const amount = Math.min(randInt(7, 13) + game.tech, tile.resourceAmount);
         game.resources[tile.resource] += amount;
         tile.resourceAmount -= amount;
 
         if (tile.resourceAmount <= 0) {
-          log(`${capitalize(tile.resource)} on this hex is depleted.`, 'warn');
+          log(`${capitalize(tile.resource)} source exhausted on this hex.`, 'warn');
         } else {
-          log(`Gatherer collected ${amount} ${tile.resource}.`, 'good');
+          log(`Civilian collected +${amount} ${tile.resource}.`, 'good');
         }
       }
 
@@ -628,10 +911,39 @@
       cleanupDeadUnits();
     }
 
+    function buildWeatherVisuals() {
+      const tornadoes = [];
+      if (game.weather === 'Cataclysmic Tempest') {
+        const count = 2 + randInt(0, 2);
+        for (let i = 0; i < count; i++) {
+          tornadoes.push({
+            x: randInt(120, canvas.width - 120),
+            y: randInt(120, canvas.height - 220),
+            size: randInt(14, 26),
+            speed: 1.4 + Math.random() * 1.3
+          });
+        }
+      }
+      game.weatherVisuals = { tornadoes };
+    }
+
+    function startAnimationLoop() {
+      if (animationLoopStarted) return;
+      animationLoopStarted = true;
+
+      const loop = (timestamp) => {
+        game.animTime = timestamp;
+        render();
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
+    }
+
     function weatherPhase() {
       const roll = Math.random();
       if (roll < 0.42) {
         game.weather = 'Calm Winds';
+        buildWeatherVisuals();
         return;
       }
 
@@ -660,9 +972,26 @@
         }
         log('Cataclysmic Tempest ravages open hexes and resources!', 'bad');
       }
+
+      buildWeatherVisuals();
     }
 
     function hostilePhase() {
+      if (game.turn <= 3) {
+        log('Hostiles remain peaceful this turn.', 'good');
+        return;
+      }
+
+      const towers = game.structures.filter(s => s.type === 'archer_tower');
+      for (const tower of towers) {
+        const target = hostileUnits().find(h => distance(tower, h) <= 2);
+        if (target) {
+          target.hp -= 2;
+          log('An archer tower fires at nearby hostiles.', 'warn');
+        }
+      }
+      cleanupDeadUnits();
+
       const players = playerUnits();
       const villages = game.structures.filter(s => s.type === 'village');
 
@@ -686,7 +1015,8 @@
           }
         }
 
-        if (best <= 1) {
+        // Enemies can only attack when standing on the same hex as the target.
+        if (best === 0) {
           const victimUnit = getUnitAt(nearest.q, nearest.r, 'player');
           if (victimUnit) {
             victimUnit.hp -= h.atk;
@@ -695,8 +1025,10 @@
           } else {
             const village = getVillageAt(nearest.q, nearest.r);
             if (village) {
-              village.hp -= h.atk;
-              log('A hostile force raids one of your villages!', 'bad');
+              const hasWall = !!getStructureAt(village.q, village.r, 'wall');
+              const reduced = Math.max(0, h.atk - (hasWall ? 2 : 0));
+              village.hp -= reduced;
+              log(hasWall ? 'A wall absorbs part of the raid damage.' : 'A hostile force raids one of your villages!', hasWall ? 'warn' : 'bad');
             }
           }
           continue;
@@ -749,12 +1081,14 @@
 
     function spawnNewHostiles() {
       if (Math.random() < 0.35) {
-        const spawn = randomMapTile(t => distance(t, { q: 0, r: 0 }) > 3 && !getUnitAt(t.q, t.r));
+        const spawn = randomMapTile(t => isShoreTile(t) && !getUnitAt(t.q, t.r));
         if (spawn) {
           addUnit(Math.random() < 0.5 ? 'raider' : 'beast', 'hostile', spawn.q, spawn.r);
           log('Hostile creatures gather in the wilds.', 'bad');
+          return true;
         }
       }
+      return false;
     }
 
     function resetPlayerMovement() {
@@ -787,23 +1121,90 @@
       }
     }
 
+    function getThreatSummary() {
+      const hostiles = hostileUnits();
+      const threatenedTargets = [
+        ...playerUnits().map(u => ({ q: u.q, r: u.r })),
+        ...game.structures.filter(s => s.type === 'village').map(v => ({ q: v.q, r: v.r }))
+      ];
+
+      let closeThreats = 0;
+      let immediateThreats = 0;
+      for (const h of hostiles) {
+        if (!threatenedTargets.length) break;
+        let nearest = Infinity;
+        for (const t of threatenedTargets) {
+          const d = distance(h, t);
+          if (d < nearest) nearest = d;
+        }
+        if (nearest <= 2) closeThreats++;
+        if (nearest === 0) immediateThreats++;
+      }
+
+      return {
+        total: hostiles.length,
+        close: closeThreats,
+        immediate: immediateThreats
+      };
+    }
+
+    function showTurnAnnouncement({ spawnedHostiles = false, intro = false } = {}) {
+      const threats = getThreatSummary();
+      const line1 = intro
+        ? `Turn ${game.turn} begins • Weather outlook: ${game.weather}`
+        : `Turn ${game.turn} report • Weather: ${game.weather}`;
+
+      const threatBits = [`${threats.total} hostile groups detected`];
+      if (threats.close > 0) threatBits.push(`${threats.close} are nearby`);
+      if (threats.immediate > 0) threatBits.push(`${threats.immediate} are on your tile`);
+      if (spawnedHostiles) threatBits.push('new threats emerged this turn');
+
+      announcementLine1El.textContent = line1;
+      announcementLine2El.textContent = 'Threats: ' + threatBits.join(' • ');
+
+      turnAnnouncementEl.classList.remove('show');
+      requestAnimationFrame(() => turnAnnouncementEl.classList.add('show'));
+
+      if (announcementHideTimer) clearTimeout(announcementHideTimer);
+      announcementHideTimer = setTimeout(() => {
+        turnAnnouncementEl.classList.remove('show');
+      }, 3800);
+    }
+
     function endTurn() {
       if (game.gameOver) return;
 
+      structureProductionPhase();
       gatherPhase();
       weatherPhase();
       hostilePhase();
       allyPhase();
-      spawnNewHostiles();
+      const spawnedHostiles = spawnNewHostiles();
 
       game.turn++;
       resetPlayerMovement();
+      recalculateVisibility();
       checkGameState();
       updateUI();
       render();
+      showTurnAnnouncement({ spawnedHostiles });
     }
 
-    function drawHex(x, y, size, fill, stroke = '#243041', lineWidth = 1.3) {
+    function adjustHexColor(hex, percent) {
+      const value = hex.replace('#', '');
+      if (value.length !== 6) return hex;
+      const num = parseInt(value, 16);
+      const r = (num >> 16) & 0xff;
+      const g = (num >> 8) & 0xff;
+      const b = num & 0xff;
+      const t = percent / 100;
+      const nr = Math.max(0, Math.min(255, Math.round(r + (255 - r) * t)));
+      const ng = Math.max(0, Math.min(255, Math.round(g + (255 - g) * t)));
+      const nb = Math.max(0, Math.min(255, Math.round(b + (255 - b) * t)));
+      return `rgb(${nr}, ${ng}, ${nb})`;
+    }
+
+    function drawHexPath(x, y, size) {
       ctx.beginPath();
       for (let i = 0; i < 6; i++) {
         const angle = Math.PI / 180 * (60 * i - 30);
@@ -813,107 +1214,339 @@
         else ctx.lineTo(px, py);
       }
       ctx.closePath();
-      ctx.fillStyle = fill;
+    }
+
+    function drawHex(x, y, size, fill, stroke = '#243041', lineWidth = 1.3) {
+      drawHexPath(x, y, size);
+      const grad = ctx.createLinearGradient(x, y - size, x, y + size);
+      grad.addColorStop(0, adjustHexColor(fill, 16));
+      grad.addColorStop(1, adjustHexColor(fill, -12));
+      ctx.fillStyle = grad;
       ctx.fill();
+
       ctx.lineWidth = lineWidth;
       ctx.strokeStyle = stroke;
       ctx.stroke();
+
+      drawHexPath(x, y, size - 4);
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    function drawTerrainDetails(tile, x, y, isOccupied) {
+      const def = terrainDefs[tile.terrain] || terrainDefs.grass;
+      const detailColor = isOccupied ? adjustHexColor(def.detail, 10) : adjustHexColor(def.detail, -24);
+      ctx.strokeStyle = detailColor;
+      ctx.lineWidth = 1.5;
+
+      for (let i = 0; i < 4; i++) {
+        const ox = -9 + i * 6;
+        const h = 4 + (i % 2) * 2;
+        ctx.beginPath();
+        ctx.moveTo(x + ox, y + 6);
+        ctx.quadraticCurveTo(x + ox + 1, y - h, x + ox + 3, y + 5);
+        ctx.stroke();
+      }
     }
 
     function drawMap() {
       for (const tile of game.map.values()) {
         const { x, y } = axialToPixel(tile.q, tile.r);
 
-        const hasPlayer = !!getUnitAt(tile.q, tile.r, 'player') || !!getVillageAt(tile.q, tile.r);
+        const hasPlayerUnit = !!getUnitAt(tile.q, tile.r, 'player');
+        const hasStructure = !!getStructureAt(tile.q, tile.r);
+        const hasPlayer = hasPlayerUnit || hasStructure;
+        const isVisibleNow = !!tile.visible;
+        const isSelected = game.selectedHex && game.selectedHex.q === tile.q && game.selectedHex.r === tile.r;
 
         let fill;
-        if (!tile.explored) {
+        let stroke = '#2d3748';
+        if (!tile.explored && !isVisibleNow) {
           fill = '#050608';
-        } else if (!hasPlayer) {
-          fill = '#1a1f2a'; // explored but dark unless occupied
+          stroke = '#161b23';
         } else {
-          fill = terrainColors[tile.terrain] || '#789';
+          const baseTerrain = terrainDefs[tile.terrain]?.color || '#d7e0ef';
+          // Keep terrain visible after exploration; only slightly dim when out of current sight.
+          fill = isVisibleNow || hasPlayer ? baseTerrain : adjustHexColor(baseTerrain, -10);
+          stroke = isVisibleNow ? '#3f577f' : '#556983';
         }
 
-        drawHex(x, y, HEX_SIZE, fill, '#2d3748');
+        drawHex(x, y, HEX_SIZE, fill, stroke, isSelected ? 2 : 1.3);
 
-        if (tile.explored && hasPlayer) {
-          if (tile.resource && tile.resourceAmount > 0) {
-            ctx.fillStyle = '#e8f0ff';
-            ctx.font = '12px sans-serif';
+        if (tile.explored || isVisibleNow) {
+          drawTerrainDetails(tile, x, y, hasPlayer || isVisibleNow);
+
+          if (tile.resource && tile.resourceAmount > 0 && (hasPlayer || isVisibleNow)) {
+            ctx.fillStyle = '#102033';
+            ctx.font = 'bold 11px sans-serif';
             ctx.textAlign = 'center';
             ctx.fillText(tile.resource[0].toUpperCase(), x, y + 4);
           }
-          if (tile.ruin && !tile.ruinVisited) {
-            ctx.fillStyle = '#f2cc60';
+
+          if (tile.ruin && !tile.ruinVisited && (hasPlayer || isVisibleNow)) {
+            ctx.fillStyle = hasPlayer ? '#f2cc60' : '#d9c78f';
             ctx.font = 'bold 14px sans-serif';
             ctx.fillText('⌂', x, y - 10);
           }
-        } else if (tile.explored && tile.ruin && !tile.ruinVisited && Math.random() < 0.015) {
-          // tiny flicker hint on dark explored ruins
-          ctx.fillStyle = 'rgba(242,204,96,0.25)';
-          ctx.beginPath();
-          ctx.arc(x, y, 6, 0, Math.PI * 2);
-          ctx.fill();
+        }
+
+        if (isSelected) {
+          ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+          ctx.lineWidth = 2;
+          drawHexPath(x, y, HEX_SIZE - 2);
+          ctx.stroke();
         }
       }
     }
 
     function drawStructures() {
+      const iconMap = {
+        village: 'V',
+        farm: 'F',
+        wall: 'W',
+        archer_tower: 'A',
+        port: 'P',
+        lumber_mill: 'L',
+        quarry: 'Q',
+        barracks: 'B'
+      };
+
       for (const s of game.structures) {
         const tile = game.map.get(key(s.q, s.r));
-        if (!tile?.explored) continue;
+        if (!tile?.explored && !tile?.visible) continue;
 
         const { x, y } = axialToPixel(s.q, s.r);
-        ctx.fillStyle = '#9fd3ff';
-        ctx.beginPath();
-        ctx.moveTo(x - 9, y + 7);
-        ctx.lineTo(x, y - 11);
-        ctx.lineTo(x + 9, y + 7);
-        ctx.closePath();
-        ctx.fill();
-        ctx.fillStyle = '#132031';
-        ctx.fillRect(x - 5, y + 3, 10, 7);
+        let base = '#476288';
+        if (s.type === 'farm') base = '#739551';
+        if (s.type === 'wall') base = '#8a8f9b';
+        if (s.type === 'archer_tower') base = '#88669d';
+        if (s.type === 'port') base = '#4a8ea2';
+        if (s.type === 'lumber_mill') base = '#7c5f43';
+        if (s.type === 'quarry') base = '#8b7b73';
+        if (s.type === 'barracks') base = '#8a5d4c';
+
+        ctx.fillStyle = base;
+        ctx.fillRect(x - 10, y - 8, 20, 16);
+
+        ctx.fillStyle = '#eff6ff';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(iconMap[s.type] || 'B', x, y + 4);
       }
     }
 
     function drawUnits() {
       for (const u of game.units) {
         const tile = game.map.get(key(u.q, u.r));
-        if (!tile?.explored) continue;
+        if (!tile?.explored && !tile?.visible) continue;
 
         const { x, y } = axialToPixel(u.q, u.r);
         let color = '#ffffff';
-        if (u.owner === 'player') color = '#7ee787';
-        if (u.owner === 'hostile') color = '#ff7b72';
-        if (u.owner === 'ally') color = '#7aa2ff';
+        if (u.owner === 'player') color = '#1fff73';
+        if (u.owner === 'hostile') color = '#ff3d3d';
+        if (u.owner === 'ally') color = '#59a3ff';
 
+        ctx.shadowColor = color;
+        ctx.shadowBlur = u.owner === 'player' ? 12 : 8;
         ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.arc(x, y, 9, 0, Math.PI * 2);
+        ctx.arc(x, y, 8, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        ctx.beginPath();
+        ctx.arc(x - 2.2, y - 2.2, 2.2, 0, Math.PI * 2);
         ctx.fill();
 
         if (u.owner === 'player' && u.id === game.selectedUnitId) {
           ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.arc(x, y, 12, 0, Math.PI * 2);
+          ctx.arc(x, y, 13, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.strokeStyle = 'rgba(31,255,115,0.8)';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(x, y, 16, 0, Math.PI * 2);
           ctx.stroke();
         }
+      }
+    }
 
-        ctx.fillStyle = '#0a0f18';
-        ctx.font = 'bold 10px sans-serif';
-        ctx.textAlign = 'center';
-        const label = u.type[0].toUpperCase();
-        ctx.fillText(label, x, y + 3);
+    function drawWeatherEffects() {
+      const t = game.animTime * 0.001;
+
+      if (game.weather === 'Hex Rain (bad weather)' || game.weather === 'Arcane Storm' || game.weather === 'Cataclysmic Tempest') {
+        const windCount = game.weather === 'Hex Rain (bad weather)' ? 40 : 62;
+        const windAlpha = game.weather === 'Hex Rain (bad weather)' ? 0.26 : 0.38;
+        ctx.lineWidth = 1.4;
+
+        for (let i = 0; i < windCount; i++) {
+          const x = ((i * 67 + t * 220) % (canvas.width + 220)) - 110;
+          const y = ((i * 41 + t * 76) % (canvas.height + 160)) - 80;
+          const len = 22 + ((i * 7) % 18);
+          ctx.strokeStyle = `rgba(182, 110, 255, ${windAlpha})`;
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x + len, y + len * 0.35);
+          ctx.stroke();
+        }
+      }
+
+      if (game.weather === 'Arcane Storm' || game.weather === 'Cataclysmic Tempest') {
+        const pulse = 0.12 + Math.abs(Math.sin(t * 2.8)) * 0.08;
+        ctx.fillStyle = `rgba(138, 88, 255, ${pulse})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+
+      if (game.weather === 'Cataclysmic Tempest') {
+        for (const tor of game.weatherVisuals.tornadoes) {
+          const cx = tor.x;
+          const cy = tor.y;
+          const spin = t * tor.speed;
+
+          for (let layer = 0; layer < 7; layer++) {
+            const radius = tor.size - layer * 2.7;
+            if (radius <= 2) continue;
+            const yOff = layer * 4;
+            ctx.strokeStyle = `rgba(206, 160, 255, ${0.24 - layer * 0.02})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(cx + Math.sin(spin + layer) * 8, cy + yOff, radius, Math.max(2, radius * 0.33), spin + layer * 0.25, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+        }
       }
     }
 
     function render() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      bg.addColorStop(0, '#111a2a');
+      bg.addColorStop(1, '#090d14');
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
       drawMap();
       drawStructures();
       drawUnits();
+      drawWeatherEffects();
+
+      const vignette = ctx.createRadialGradient(canvas.width / 2, canvas.height / 2, canvas.height * 0.28, canvas.width / 2, canvas.height / 2, canvas.height * 0.72);
+      vignette.addColorStop(0, 'rgba(0,0,0,0)');
+      vignette.addColorStop(1, 'rgba(0,0,0,0.33)');
+      ctx.fillStyle = vignette;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = 'rgba(10, 15, 24, 0.78)';
+      ctx.fillRect(10, 10, 300, 34);
+      ctx.fillStyle = '#d7e6ff';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('Drag to pan map • Viewport offset: ' + Math.round(camera.x) + ', ' + Math.round(camera.y), 18, 31);
+    }
+
+    function getContextActionMarkup(hex) {
+      if (!hex) {
+        return {
+          hasActions: false,
+          html: 'Click a village for recruit options, or an explored hex for build options.'
+        };
+      }
+
+      const tile = game.map.get(key(hex.q, hex.r));
+      if (!tile) {
+        return { hasActions: false, html: 'No selectable actions here.' };
+      }
+
+      const village = getStructureAt(hex.q, hex.r, 'village');
+      const barracks = getStructureAt(hex.q, hex.r, 'barracks');
+      const canBuildHere = tile.explored;
+      const unit = getUnitAt(hex.q, hex.r, 'player');
+      const canTrade = !!getUnitAt(hex.q, hex.r, 'ally') && !!unit;
+
+      const unitNotes = unit
+        ? `<div class="small" style="margin-bottom:6px; color:#bed2f8;">${unit.type.toUpperCase()} options: move to adjacent hex${unit.type === 'civilian' ? ' • auto-collects resources on End Turn' : ''}${unit.type === 'scout' ? ' • reveals 2-hex range' : ''}${unit.type === 'defender' ? ' • very high hit points' : ''}</div>`
+        : '';
+
+      const recruitButtons = village
+        ? `<div class="small" style="margin:6px 0 4px;">Village recruits:</div>
+           <div class="btn-row">
+             <button data-action="recruit-scout">Recruit Scout</button>
+             <button data-action="recruit-civilian">Recruit Civilian</button>
+             <button data-action="recruit-soldier">Recruit Soldier</button>
+             <button data-action="recruit-builder">Recruit Builder</button>
+           </div>`
+        : '';
+
+      const barracksButtons = barracks
+        ? `<div class="small" style="margin:8px 0 4px;">Barracks training:</div>
+           <div class="btn-row">
+             <button data-action="recruit-archer">Train Archer</button>
+             <button data-action="recruit-ranger">Train Ranger</button>
+             <button data-action="recruit-defender">Train Defender</button>
+           </div>`
+        : '';
+
+      const buildButtons = canBuildHere
+        ? `<div class="small" style="margin:8px 0 4px;">Build on this explored hex:</div>
+           <div class="btn-row">
+             <button data-action="build-village">Village</button>
+             <button data-action="build-farm">Farm</button>
+             <button data-action="build-wall">Wall</button>
+             <button data-action="build-archer_tower">Archer Tower</button>
+             <button data-action="build-port">Port</button>
+             <button data-action="build-lumber_mill">Lumber Mill</button>
+             <button data-action="build-quarry">Quarry</button>
+             <button data-action="build-barracks">Barracks</button>
+           </div>`
+        : '<div class="small" style="margin-top:8px;">Build options appear on explored hexes.</div>';
+
+      const tradeButton = canTrade
+        ? '<div style="margin-top:8px;"><button data-action="trade-now">Trade with Ally</button></div>'
+        : '';
+
+      const html = `${unitNotes}${recruitButtons}${barracksButtons}${buildButtons}${tradeButton}`;
+      return {
+        hasActions: !!(village || barracks || canBuildHere || canTrade || unit),
+        html
+      };
+    }
+
+    function showActionPopup(clientX, clientY, html) {
+      actionPopupEl.innerHTML = html;
+      const wrapRect = canvasWrapEl.getBoundingClientRect();
+
+      let left = clientX - wrapRect.left + 12;
+      let top = clientY - wrapRect.top + 12;
+
+      actionPopupEl.style.left = left + 'px';
+      actionPopupEl.style.top = top + 'px';
+      actionPopupEl.classList.add('show');
+
+      const popupRect = actionPopupEl.getBoundingClientRect();
+      const overflowRight = popupRect.right - wrapRect.right;
+      const overflowBottom = popupRect.bottom - wrapRect.bottom;
+      if (overflowRight > 0) left -= overflowRight + 10;
+      if (overflowBottom > 0) top -= overflowBottom + 10;
+
+      actionPopupEl.style.left = Math.max(8, left) + 'px';
+      actionPopupEl.style.top = Math.max(8, top) + 'px';
+    }
+
+    function hideActionPopup() {
+      actionPopupEl.classList.remove('show');
+    }
+
+    function updateContextActions() {
+      const context = getContextActionMarkup(game.selectedHex);
+      contextActionsEl.innerHTML = context.hasActions
+        ? 'Options are shown in the popup for the selected unit/hex.'
+        : 'Click a village for recruit options, or an explored hex for build options.';
     }
 
     function updateSelectionInfo() {
@@ -928,11 +1561,23 @@
       if (hex) {
         const tile = game.map.get(key(hex.q, hex.r));
         if (tile) {
-          bits.push(`Hex ${hex.q},${hex.r} - ${tile.terrain}${tile.resource ? ', ' + tile.resource + ' (' + tile.resourceAmount + ')' : ''}${tile.ruin && !tile.ruinVisited ? ', ruin' : ''}${tile.explored ? '' : ', unexplored'}`);
+          bits.push(`Hex ${hex.q},${hex.r} - ${tile.terrain}${tile.resource ? ', ' + tile.resource + ' source (' + tile.resourceAmount + ')' : ''}${tile.ruin && !tile.ruinVisited ? ', ruin' : ''}${tile.explored ? '' : ', unexplored'}${isShoreTile(tile) ? ', shore' : ''}`);
         }
       }
 
+      if (unit && unit.owner === 'player') {
+        const options = ['Move to an adjacent hex', 'Build on selected explored hex'];
+        if (unit.type === 'scout') options.push('Scout sight reveals tiles 2 hexes away');
+        if (unit.type === 'civilian') options.push('Auto-collects resources on End Turn');
+        if (unit.type === 'defender') options.push('Very high hit points');
+        if (getUnitAt(unit.q, unit.r, 'ally')) options.push('Trade button available');
+        unitOptionsEl.textContent = 'Options: ' + options.join(' • ');
+      } else {
+        unitOptionsEl.textContent = 'Click a unit to view its options.';
+      }
+
       selectionEl.textContent = bits.length ? bits.join(' | ') : 'None';
+      updateContextActions();
     }
 
     function updateUI() {
@@ -963,16 +1608,27 @@
       return str.charAt(0).toUpperCase() + str.slice(1);
     }
 
-    canvas.addEventListener('click', (event) => {
-      if (game.gameOver) return;
+    function getCanvasPoint(event) {
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width;
       const scaleY = canvas.height / rect.height;
-      const x = (event.clientX - rect.left) * scaleX;
-      const y = (event.clientY - rect.top) * scaleY;
+      return {
+        x: (event.clientX - rect.left) * scaleX,
+        y: (event.clientY - rect.top) * scaleY
+      };
+    }
+
+    function onMapClick(event) {
+      if (game.gameOver) return;
+      if (camera.dragMoved) return;
+
+      const { x, y } = getCanvasPoint(event);
       const hex = pixelToAxial(x, y);
 
-      if (!game.map.has(key(hex.q, hex.r))) return;
+      if (!game.map.has(key(hex.q, hex.r))) {
+        hideActionPopup();
+        return;
+      }
       game.selectedHex = hex;
 
       const clickedPlayer = getUnitAt(hex.q, hex.r, 'player');
@@ -980,6 +1636,9 @@
         game.selectedUnitId = clickedPlayer.id;
         updateUI();
         render();
+        const context = getContextActionMarkup(hex);
+        if (context.hasActions) showActionPopup(event.clientX, event.clientY, context.html);
+        else hideActionPopup();
         return;
       }
 
@@ -990,13 +1649,93 @@
 
       updateUI();
       render();
+      const context = getContextActionMarkup(hex);
+      if (context.hasActions) showActionPopup(event.clientX, event.clientY, context.html);
+      else hideActionPopup();
+    }
+
+    canvas.addEventListener('mousedown', (event) => {
+      camera.isDragging = true;
+      camera.dragMoved = false;
+      camera.startMouseX = event.clientX;
+      camera.startMouseY = event.clientY;
+      camera.startCamX = camera.x;
+      camera.startCamY = camera.y;
+      canvas.style.cursor = 'grabbing';
+      hideActionPopup();
     });
 
-    recruitScoutBtn.addEventListener('click', () => recruit('scout'));
-    recruitGathererBtn.addEventListener('click', () => recruit('gatherer'));
-    recruitSoldierBtn.addEventListener('click', () => recruit('soldier'));
-    recruitSettlerBtn.addEventListener('click', () => recruit('settler'));
-    buildVillageBtn.addEventListener('click', buildVillage);
+    canvas.addEventListener('mousemove', (event) => {
+      if (!camera.isDragging) return;
+      const dx = event.clientX - camera.startMouseX;
+      const dy = event.clientY - camera.startMouseY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) camera.dragMoved = true;
+
+      camera.x = camera.startCamX + dx;
+      camera.y = camera.startCamY + dy;
+      updateCameraBounds();
+      render();
+    });
+
+    const endDrag = () => {
+      if (!camera.isDragging) return;
+      camera.isDragging = false;
+      canvas.style.cursor = 'grab';
+      setTimeout(() => {
+        camera.dragMoved = false;
+      }, 0);
+    };
+
+    canvas.addEventListener('mouseup', endDrag);
+    canvas.addEventListener('mouseleave', endDrag);
+    canvas.addEventListener('click', onMapClick);
+
+    function handleContextAction(action) {
+      if (!action) return;
+
+      if (action.startsWith('recruit-')) {
+        const type = action.replace('recruit-', '');
+        recruit(type, game.selectedHex);
+        return;
+      }
+
+      if (action.startsWith('build-')) {
+        const type = action.replace('build-', '');
+        buildStructure(type);
+        return;
+      }
+
+      if (action === 'trade-now') {
+        tradeWithAlly();
+      }
+    }
+
+    const contextActionClickHandler = (event) => {
+      const btn = event.target.closest('button[data-action]');
+      if (!btn) return;
+      const action = btn.getAttribute('data-action');
+      handleContextAction(action);
+      updateUI();
+      render();
+      const context = getContextActionMarkup(game.selectedHex);
+      if (context.hasActions) {
+        const rect = canvasWrapEl.getBoundingClientRect();
+        const anchor = game.selectedHex ? axialToPixel(game.selectedHex.q, game.selectedHex.r) : { x: 36, y: 36 };
+        showActionPopup(rect.left + anchor.x, rect.top + anchor.y, context.html);
+      } else {
+        hideActionPopup();
+      }
+    };
+
+    contextActionsEl.addEventListener('click', contextActionClickHandler);
+    actionPopupEl.addEventListener('click', contextActionClickHandler);
+
+    document.addEventListener('click', (event) => {
+      const insidePopup = actionPopupEl.contains(event.target);
+      const onCanvas = event.target === canvas;
+      if (!insidePopup && !onCanvas) hideActionPopup();
+    });
+
     tradeBtn.addEventListener('click', tradeWithAlly);
     endTurnBtn.addEventListener('click', endTurn);
 
