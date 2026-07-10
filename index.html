@@ -232,7 +232,7 @@
         <strong>Selected Tile / Unit</strong>
         <div id="selectionEl" class="small">None</div>
         <div id="unitOptionsEl" class="small" style="margin-top:8px; color:#b7c8e7;">Click a unit to view its options.</div>
-        <div id="contextActionsEl" class="small" style="margin-top:8px; color:#d5e3fb;">Click a village for recruit options, or an explored hex for build options.</div>
+        <div id="contextActionsEl" class="small" style="margin-top:8px; color:#d5e3fb;">Click a village or city for recruit options, or an explored hex for build options.</div>
       </div>
 
       <div class="section">
@@ -466,7 +466,7 @@
       }
 
       for (const s of game.structures) {
-        if (s.type === 'village') revealFrom(s.q, s.r, 1);
+        if (s.type === 'village' || s.type === 'city') revealFrom(s.q, s.r, 1);
       }
     }
 
@@ -534,7 +534,6 @@
         archer: { hp: 7, maxMoves: 1, atk: 4 },
         ranger: { hp: 9, maxMoves: 2, atk: 3 },
         defender: { hp: 16, maxMoves: 1, atk: 2 },
-        builder: { hp: 6, maxMoves: 1, atk: 1 },
         raider: { hp: 6, maxMoves: 1, atk: 2 },
         beast: { hp: 7, maxMoves: 1, atk: 3 },
         ally: { hp: 6, maxMoves: 1, atk: 1 }
@@ -606,7 +605,7 @@
     }
 
     function getVillageAt(q, r) {
-      return game.structures.find(s => s.type === 'village' && s.q === q && s.r === r);
+      return game.structures.find(s => (s.type === 'village' || s.type === 'city') && s.q === q && s.r === r);
     }
 
     function getStructureAt(q, r, type = null) {
@@ -615,6 +614,20 @@
 
     function structureCount(type) {
       return game.structures.filter(s => s.type === type).length;
+    }
+
+    function playerPopulationCap() {
+      const villages = structureCount('village');
+      const cities = structureCount('city');
+      return villages * 5 + cities * 10;
+    }
+
+    function canAddPlayerUnit(count = 1) {
+      return playerUnits().length + count <= playerPopulationCap();
+    }
+
+    function settlementStructures() {
+      return game.structures.filter(s => s.type === 'village' || s.type === 'city');
     }
 
     function playerUnits() {
@@ -643,17 +656,15 @@
         scout: { food: 12, wood: 8 },
         civilian: { food: 14, wood: 6 },
         soldier: { food: 20, iron: 12, wood: 8 },
-        builder: { food: 26, wood: 18, stone: 12 },
         archer: { food: 18, wood: 16, iron: 10 },
         ranger: { food: 24, wood: 14, herbs: 8, iron: 8 },
         defender: { food: 28, wood: 14, stone: 18, iron: 16 }
       };
 
       const trainingSiteByUnit = {
-        scout: 'village',
-        civilian: 'village',
-        soldier: 'village',
-        builder: 'village',
+        scout: 'settlement',
+        civilian: 'settlement',
+        soldier: 'settlement',
         archer: 'barracks',
         ranger: 'barracks',
         defender: 'barracks'
@@ -661,33 +672,75 @@
 
       const cost = costs[type];
       if (!cost) return;
+
+      if (!canAddPlayerUnit(1)) {
+        log(`Population cap reached (${playerUnits().length}/${playerPopulationCap()}). Upgrade villages to cities to increase cap.`, 'warn');
+        return;
+      }
+
       if (!canAfford(cost)) {
         log(`Not enough resources for ${type}.`, 'bad');
         return;
       }
 
-      const requiredSite = trainingSiteByUnit[type] || 'village';
+      const requiredSite = trainingSiteByUnit[type] || 'settlement';
       let source = null;
 
       if (sourceHex) {
-        source = getStructureAt(sourceHex.q, sourceHex.r, requiredSite);
+        if (requiredSite === 'settlement') {
+          source = getVillageAt(sourceHex.q, sourceHex.r);
+        } else {
+          source = getStructureAt(sourceHex.q, sourceHex.r, requiredSite);
+        }
         if (!source) {
-          log(`${capitalize(type)} training requires selecting a ${requiredSite} tile.`, 'warn');
+          const siteLabel = requiredSite === 'settlement' ? 'village or city' : requiredSite;
+          log(`${capitalize(type)} training requires selecting a ${siteLabel} tile.`, 'warn');
           return;
         }
+      } else if (requiredSite === 'settlement') {
+        source = settlementStructures()[0];
       } else {
         source = game.structures.find(s => s.type === requiredSite);
       }
 
       if (!source) {
-        log(`No ${requiredSite} available to train ${type}.`, 'bad');
+        const siteLabel = requiredSite === 'settlement' ? 'village or city' : requiredSite;
+        log(`No ${siteLabel} available to train ${type}.`, 'bad');
         return;
       }
 
       spend(cost);
       addUnit(type, 'player', source.q, source.r);
       recalculateVisibility();
-      log(`${capitalize(type)} trained at the ${requiredSite}.`, 'good');
+      log(`${capitalize(type)} trained at the ${source.type}.`, 'good');
+      updateUI();
+      render();
+    }
+
+    function upgradeVillageToCity() {
+      if (game.gameOver) return;
+      if (!game.selectedHex) {
+        log('Select a village tile to upgrade.', 'warn');
+        return;
+      }
+
+      const village = getStructureAt(game.selectedHex.q, game.selectedHex.r, 'village');
+      if (!village) {
+        log('Only villages can be upgraded into cities.', 'warn');
+        return;
+      }
+
+      const cost = { wood: 50, stone: 60, iron: 30, crystal: 12 };
+      if (!canAfford(cost)) {
+        log('Not enough resources to upgrade to a city.', 'bad');
+        return;
+      }
+
+      spend(cost);
+      village.type = 'city';
+      village.hp = Math.max(village.hp, 30);
+      log('Village upgraded to a city. Population cap increased.', 'good');
+      recalculateVisibility();
       updateUI();
       render();
     }
@@ -747,7 +800,7 @@
       }
 
       if (type === 'village' && getVillageAt(target.q, target.r)) {
-        log('A village already exists here.', 'warn');
+        log('A settlement already exists here.', 'warn');
         return;
       }
 
@@ -911,6 +964,30 @@
       cleanupDeadUnits();
     }
 
+    function civilianGrowthPhase() {
+      const settlements = settlementStructures();
+      if (!settlements.length) return;
+
+      const cap = playerPopulationCap();
+      let current = playerUnits().length;
+      if (current >= cap) return;
+
+      let spawned = 0;
+      for (const settlement of settlements) {
+        if (current >= cap) break;
+        const chance = settlement.type === 'city' ? 0.65 : 0.4;
+        if (Math.random() < chance) {
+          addUnit('civilian', 'player', settlement.q, settlement.r);
+          spawned++;
+          current++;
+        }
+      }
+
+      if (spawned > 0) {
+        log(`Population growth: ${spawned} civilian${spawned > 1 ? 's' : ''} joined your settlements.`, 'good');
+      }
+    }
+
     function buildWeatherVisuals() {
       const tornadoes = [];
       if (game.weather === 'Cataclysmic Tempest') {
@@ -993,7 +1070,7 @@
       cleanupDeadUnits();
 
       const players = playerUnits();
-      const villages = game.structures.filter(s => s.type === 'village');
+      const villages = settlementStructures();
 
       for (const h of hostileUnits()) {
         h.moves = h.maxMoves;
@@ -1108,7 +1185,7 @@
       if (!playerUnits().length && !game.structures.length) {
         game.gameOver = true;
         statusEl.innerHTML = '<span class="bad">Defeat: your expedition has fallen.</span>';
-        log('Defeat. No units or villages remain.', 'bad');
+        log('Defeat. No units or settlements remain.', 'bad');
         return;
       }
 
@@ -1125,7 +1202,7 @@
       const hostiles = hostileUnits();
       const threatenedTargets = [
         ...playerUnits().map(u => ({ q: u.q, r: u.r })),
-        ...game.structures.filter(s => s.type === 'village').map(v => ({ q: v.q, r: v.r }))
+        ...settlementStructures().map(v => ({ q: v.q, r: v.r }))
       ];
 
       let closeThreats = 0;
@@ -1176,6 +1253,7 @@
 
       structureProductionPhase();
       gatherPhase();
+      civilianGrowthPhase();
       weatherPhase();
       hostilePhase();
       allyPhase();
@@ -1303,6 +1381,7 @@
     function drawStructures() {
       const iconMap = {
         village: 'V',
+        city: 'C',
         farm: 'F',
         wall: 'W',
         archer_tower: 'A',
@@ -1318,6 +1397,7 @@
 
         const { x, y } = axialToPixel(s.q, s.r);
         let base = '#476288';
+        if (s.type === 'city') base = '#3c78b6';
         if (s.type === 'farm') base = '#739551';
         if (s.type === 'wall') base = '#8a8f9b';
         if (s.type === 'archer_tower') base = '#88669d';
@@ -1454,7 +1534,7 @@
       if (!hex) {
         return {
           hasActions: false,
-          html: 'Click a village for recruit options, or an explored hex for build options.'
+          html: 'Click a village or city for recruit options, or an explored hex for build options.'
         };
       }
 
@@ -1464,6 +1544,8 @@
       }
 
       const village = getStructureAt(hex.q, hex.r, 'village');
+      const city = getStructureAt(hex.q, hex.r, 'city');
+      const settlement = village || city;
       const barracks = getStructureAt(hex.q, hex.r, 'barracks');
       const canBuildHere = tile.explored;
       const unit = getUnitAt(hex.q, hex.r, 'player');
@@ -1473,14 +1555,17 @@
         ? `<div class="small" style="margin-bottom:6px; color:#bed2f8;">${unit.type.toUpperCase()} options: move to adjacent hex${unit.type === 'civilian' ? ' • auto-collects resources on End Turn' : ''}${unit.type === 'scout' ? ' • reveals 2-hex range' : ''}${unit.type === 'defender' ? ' • very high hit points' : ''}</div>`
         : '';
 
-      const recruitButtons = village
-        ? `<div class="small" style="margin:6px 0 4px;">Village recruits:</div>
+      const recruitButtons = settlement
+        ? `<div class="small" style="margin:6px 0 4px;">${settlement.type === 'city' ? 'City' : 'Village'} recruits:</div>
            <div class="btn-row">
              <button data-action="recruit-scout">Recruit Scout</button>
              <button data-action="recruit-civilian">Recruit Civilian</button>
              <button data-action="recruit-soldier">Recruit Soldier</button>
-             <button data-action="recruit-builder">Recruit Builder</button>
            </div>`
+        : '';
+
+      const settlementButtons = village
+        ? `<div style="margin-top:8px;"><button data-action="upgrade-city">Upgrade to City</button></div>`
         : '';
 
       const barracksButtons = barracks
@@ -1510,9 +1595,9 @@
         ? '<div style="margin-top:8px;"><button data-action="trade-now">Trade with Ally</button></div>'
         : '';
 
-      const html = `${unitNotes}${recruitButtons}${barracksButtons}${buildButtons}${tradeButton}`;
+      const html = `${unitNotes}${recruitButtons}${settlementButtons}${barracksButtons}${buildButtons}${tradeButton}`;
       return {
-        hasActions: !!(village || barracks || canBuildHere || canTrade || unit),
+        hasActions: !!(settlement || barracks || canBuildHere || canTrade || unit),
         html
       };
     }
@@ -1546,7 +1631,7 @@
       const context = getContextActionMarkup(game.selectedHex);
       contextActionsEl.innerHTML = context.hasActions
         ? 'Options are shown in the popup for the selected unit/hex.'
-        : 'Click a village for recruit options, or an explored hex for build options.';
+        : 'Click a village or city for recruit options, or an explored hex for build options.';
     }
 
     function updateSelectionInfo() {
@@ -1585,8 +1670,11 @@
       turnEl.textContent = game.turn;
 
       const hostiles = hostileUnits().length;
-      const villages = game.structures.filter(s => s.type === 'village').length;
-      statusEl.innerHTML = `Weather: <strong>${game.weather}</strong><br/>Explored: ${progress.explored}/${progress.total} (${progress.pct}%) | Hostiles: ${hostiles} | Villages: ${villages} | Tech: ${game.tech}`;
+      const villages = structureCount('village');
+      const cities = structureCount('city');
+      const population = playerUnits().length;
+      const popCap = playerPopulationCap();
+      statusEl.innerHTML = `Weather: <strong>${game.weather}</strong><br/>Explored: ${progress.explored}/${progress.total} (${progress.pct}%) | Hostiles: ${hostiles} | Villages: ${villages} | Cities: ${cities} | Pop: ${population}/${popCap} | Tech: ${game.tech}`;
 
       const entries = [
         ['Food', game.resources.food],
@@ -1702,6 +1790,11 @@
       if (action.startsWith('build-')) {
         const type = action.replace('build-', '');
         buildStructure(type);
+        return;
+      }
+
+      if (action === 'upgrade-city') {
+        upgradeVillageToCity();
         return;
       }
 
