@@ -1460,8 +1460,8 @@
         let fill;
         let stroke = '#2d3748';
         if (!tile.explored && !isVisibleNow) {
-          fill = '#050608';
-          stroke = '#161b23';
+          fill = '#5f6b63';
+          stroke = '#829186';
         } else {
           const baseTerrain = terrainDefs[tile.terrain]?.color || '#d7e0ef';
           // Keep terrain visible after exploration; only slightly dim when out of current sight.
@@ -1470,6 +1470,15 @@
         }
 
         drawHex(x, y, HEX_SIZE, fill, stroke, isSelected ? 2 : 1.3);
+
+        if (!tile.explored && !isVisibleNow) {
+          const haze = ctx.createRadialGradient(x - 3, y - 6, 4, x, y, HEX_SIZE + 4);
+          haze.addColorStop(0, 'rgba(235,245,239,0.30)');
+          haze.addColorStop(1, 'rgba(210,223,214,0.07)');
+          ctx.fillStyle = haze;
+          drawHexPath(x, y, HEX_SIZE - 1);
+          ctx.fill();
+        }
 
         if (tile.explored || isVisibleNow) {
           drawTerrainDetails(tile, x, y, hasPlayer || isVisibleNow);
