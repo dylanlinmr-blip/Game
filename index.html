@@ -461,7 +461,7 @@
       };
 
       for (const u of playerUnits()) {
-        const range = u.type === 'scout' ? 2 : 0;
+        const range = unitHasType(u, 'scout') ? 2 : 0;
         revealFrom(u.q, u.r, range);
       }
 
@@ -622,12 +622,34 @@
       return villages * 5 + cities * 10;
     }
 
+    function unitPopulationCost(unit) {
+      if (unit.type === 'army') return Math.max(1, unit.members?.length || 0);
+      return 1;
+    }
+
+    function playerPopulationUsed() {
+      return playerUnits().reduce((sum, unit) => sum + unitPopulationCost(unit), 0);
+    }
+
     function canAddPlayerUnit(count = 1) {
-      return playerUnits().length + count <= playerPopulationCap();
+      return playerPopulationUsed() + count <= playerPopulationCap();
     }
 
     function settlementStructures() {
       return game.structures.filter(s => s.type === 'village' || s.type === 'city');
+    }
+
+    function unitMembers(unit) {
+      if (unit.type === 'army' && Array.isArray(unit.members)) return unit.members;
+      return [{ type: unit.type, hp: unit.hp, maxHp: unit.maxHp, atk: unit.atk, maxMoves: unit.maxMoves, moves: unit.moves }];
+    }
+
+    function unitHasType(unit, type) {
+      return unitMembers(unit).some(m => m.type === type);
+    }
+
+    function unitTypeCount(unit, type) {
+      return unitMembers(unit).filter(m => m.type === type).length;
     }
 
     function playerUnits() {
@@ -674,7 +696,7 @@
       if (!cost) return;
 
       if (!canAddPlayerUnit(1)) {
-        log(`Population cap reached (${playerUnits().length}/${playerPopulationCap()}). Upgrade villages to cities to increase cap.`, 'warn');
+        log(`Population cap reached (${playerPopulationUsed()}/${playerPopulationCap()}). Upgrade villages to cities to increase cap.`, 'warn');
         return;
       }
 
@@ -740,6 +762,100 @@
       village.type = 'city';
       village.hp = Math.max(village.hp, 30);
       log('Village upgraded to a city. Population cap increased.', 'good');
+      recalculateVisibility();
+      updateUI();
+      render();
+    }
+
+    function createArmyFromUnits(units) {
+      const members = [];
+      for (const u of units) {
+        const parts = unitMembers(u);
+        for (const part of parts) members.push({ ...part });
+      }
+
+      const maxHp = members.reduce((sum, m) => sum + m.maxHp, 0);
+      const hp = Math.max(1, members.reduce((sum, m) => sum + Math.max(1, m.hp), 0));
+      const atk = Math.max(1, members.reduce((sum, m) => sum + Math.max(1, m.atk), 0));
+      const maxMoves = Math.max(...members.map(m => Math.max(1, m.maxMoves)), 1);
+      const moves = Math.min(...members.map(m => Math.max(0, m.moves ?? m.maxMoves)), maxMoves);
+
+      return {
+        id: game.nextUnitId++,
+        type: 'army',
+        owner: 'player',
+        q: units[0].q,
+        r: units[0].r,
+        hp,
+        maxHp,
+        atk,
+        moves,
+        maxMoves,
+        members
+      };
+    }
+
+    function formArmyAtSelectedHex() {
+      if (game.gameOver) return;
+      if (!game.selectedHex) {
+        log('Select a hex with your units to form an army.', 'warn');
+        return;
+      }
+
+      const onHex = getUnitsAt(game.selectedHex.q, game.selectedHex.r).filter(u => u.owner === 'player');
+      if (onHex.length < 2) {
+        log('Need at least 2 friendly units on one hex to form an army.', 'warn');
+        return;
+      }
+
+      const army = createArmyFromUnits(onHex);
+      const ids = new Set(onHex.map(u => u.id));
+      game.units = game.units.filter(u => !ids.has(u.id));
+      game.units.push(army);
+      game.selectedUnitId = army.id;
+
+      log(`Army formed: ${army.members.length} units fighting together.`, 'good');
+      recalculateVisibility();
+      updateUI();
+      render();
+    }
+
+    function splitSelectedArmy() {
+      const army = game.units.find(u => u.id === game.selectedUnitId && u.owner === 'player');
+      if (!army || army.type !== 'army') {
+        log('Select an army to split.', 'warn');
+        return;
+      }
+
+      const pieces = army.members || [];
+      if (!pieces.length) {
+        log('This army cannot be split.', 'warn');
+        return;
+      }
+
+      game.units = game.units.filter(u => u.id !== army.id);
+      const created = [];
+      const healthScale = army.maxHp > 0 ? Math.max(0.05, army.hp / army.maxHp) : 0.5;
+      for (const part of pieces) {
+        const partMaxHp = Math.max(1, part.maxHp);
+        const unit = {
+          id: game.nextUnitId++,
+          type: part.type,
+          owner: 'player',
+          q: army.q,
+          r: army.r,
+          hp: Math.max(1, Math.round(partMaxHp * healthScale)),
+          maxHp: partMaxHp,
+          moves: Math.min(army.moves, part.moves ?? part.maxMoves),
+          maxMoves: Math.max(1, part.maxMoves),
+          atk: Math.max(1, part.atk)
+        };
+        game.units.push(unit);
+        created.push(unit);
+      }
+
+      game.selectedUnitId = created[0]?.id || null;
+      log(`Army split into ${created.length} separate units.`, 'good');
       recalculateVisibility();
       updateUI();
       render();
@@ -937,21 +1053,24 @@
       for (const u of playerUnits()) {
         const tile = game.map.get(key(u.q, u.r));
         if (!tile || !tile.resource || tile.resourceAmount <= 0) continue;
-        if (u.type !== 'civilian') continue;
 
-        const amount = Math.min(randInt(7, 13) + game.tech, tile.resourceAmount);
+        const civilianCount = unitTypeCount(u, 'civilian');
+        if (civilianCount <= 0) continue;
+
+        const perCivilian = randInt(5, 9) + game.tech;
+        const amount = Math.min(perCivilian * civilianCount, tile.resourceAmount);
         game.resources[tile.resource] += amount;
         tile.resourceAmount -= amount;
 
         if (tile.resourceAmount <= 0) {
           log(`${capitalize(tile.resource)} source exhausted on this hex.`, 'warn');
         } else {
-          log(`Civilian collected +${amount} ${tile.resource}.`, 'good');
+          log(`${u.type === 'army' ? 'Army civilians' : 'Civilian'} collected +${amount} ${tile.resource}.`, 'good');
         }
       }
 
       // Food upkeep
-      const upkeep = Math.max(2, Math.floor(playerUnits().length * 1.2));
+      const upkeep = Math.max(2, Math.floor(playerPopulationUsed() * 1.2));
       game.resources.food -= upkeep;
       if (game.resources.food < 0) {
         game.resources.food = 0;
@@ -969,7 +1088,7 @@
       if (!settlements.length) return;
 
       const cap = playerPopulationCap();
-      let current = playerUnits().length;
+      let current = playerPopulationUsed();
       if (current >= cap) return;
 
       let spawned = 0;
@@ -1341,8 +1460,8 @@
         let fill;
         let stroke = '#2d3748';
         if (!tile.explored && !isVisibleNow) {
-          fill = '#050608';
-          stroke = '#161b23';
+          fill = '#5f6b63';
+          stroke = '#829186';
         } else {
           const baseTerrain = terrainDefs[tile.terrain]?.color || '#d7e0ef';
           // Keep terrain visible after exploration; only slightly dim when out of current sight.
@@ -1351,6 +1470,15 @@
         }
 
         drawHex(x, y, HEX_SIZE, fill, stroke, isSelected ? 2 : 1.3);
+
+        if (!tile.explored && !isVisibleNow) {
+          const haze = ctx.createRadialGradient(x - 3, y - 6, 4, x, y, HEX_SIZE + 4);
+          haze.addColorStop(0, 'rgba(235,245,239,0.30)');
+          haze.addColorStop(1, 'rgba(210,223,214,0.07)');
+          ctx.fillStyle = haze;
+          drawHexPath(x, y, HEX_SIZE - 1);
+          ctx.fill();
+        }
 
         if (tile.explored || isVisibleNow) {
           drawTerrainDetails(tile, x, y, hasPlayer || isVisibleNow);
@@ -1427,11 +1555,13 @@
         if (u.owner === 'hostile') color = '#ff3d3d';
         if (u.owner === 'ally') color = '#59a3ff';
 
+        const radius = u.type === 'army' ? 11 : 8;
+
         ctx.shadowColor = color;
         ctx.shadowBlur = u.owner === 'player' ? 12 : 8;
         ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.arc(x, y, 8, 0, Math.PI * 2);
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.shadowBlur = 0;
@@ -1440,17 +1570,24 @@
         ctx.arc(x - 2.2, y - 2.2, 2.2, 0, Math.PI * 2);
         ctx.fill();
 
+        if (u.type === 'army') {
+          ctx.fillStyle = '#08210f';
+          ctx.font = 'bold 10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(String(Math.min(99, u.members?.length || 0)), x, y + 3);
+        }
+
         if (u.owner === 'player' && u.id === game.selectedUnitId) {
           ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.arc(x, y, 13, 0, Math.PI * 2);
+          ctx.arc(x, y, radius + 5, 0, Math.PI * 2);
           ctx.stroke();
 
           ctx.strokeStyle = 'rgba(31,255,115,0.8)';
           ctx.lineWidth = 1.5;
           ctx.beginPath();
-          ctx.arc(x, y, 16, 0, Math.PI * 2);
+          ctx.arc(x, y, radius + 8, 0, Math.PI * 2);
           ctx.stroke();
         }
       }
@@ -1549,10 +1686,13 @@
       const barracks = getStructureAt(hex.q, hex.r, 'barracks');
       const canBuildHere = tile.explored;
       const unit = getUnitAt(hex.q, hex.r, 'player');
+      const playerStack = getUnitsAt(hex.q, hex.r).filter(u => u.owner === 'player');
+      const canFormArmy = playerStack.length >= 2;
+      const canSplitArmy = !!unit && unit.type === 'army' && (unit.members?.length || 0) > 1;
       const canTrade = !!getUnitAt(hex.q, hex.r, 'ally') && !!unit;
 
       const unitNotes = unit
-        ? `<div class="small" style="margin-bottom:6px; color:#bed2f8;">${unit.type.toUpperCase()} options: move to adjacent hex${unit.type === 'civilian' ? ' • auto-collects resources on End Turn' : ''}${unit.type === 'scout' ? ' • reveals 2-hex range' : ''}${unit.type === 'defender' ? ' • very high hit points' : ''}</div>`
+        ? `<div class="small" style="margin-bottom:6px; color:#bed2f8;">${unit.type.toUpperCase()} options: move to adjacent hex${unit.type === 'civilian' ? ' • auto-collects resources on End Turn' : ''}${unitHasType(unit, 'scout') ? ' • reveals 2-hex range' : ''}${unitHasType(unit, 'defender') ? ' • very high hit points' : ''}${unit.type === 'army' ? ` • ${unit.members.length} units combined` : ''}</div>`
         : '';
 
       const recruitButtons = settlement
@@ -1591,13 +1731,17 @@
            </div>`
         : '<div class="small" style="margin-top:8px;">Build options appear on explored hexes.</div>';
 
+      const armyButtons = (canFormArmy || canSplitArmy)
+        ? `<div style="margin-top:8px;" class="btn-row">${canFormArmy ? '<button data-action="form-army">Form Army</button>' : ''}${canSplitArmy ? '<button data-action="split-army">Split Army</button>' : ''}</div>`
+        : '';
+
       const tradeButton = canTrade
         ? '<div style="margin-top:8px;"><button data-action="trade-now">Trade with Ally</button></div>'
         : '';
 
-      const html = `${unitNotes}${recruitButtons}${settlementButtons}${barracksButtons}${buildButtons}${tradeButton}`;
+      const html = `${unitNotes}${recruitButtons}${settlementButtons}${barracksButtons}${buildButtons}${armyButtons}${tradeButton}`;
       return {
-        hasActions: !!(settlement || barracks || canBuildHere || canTrade || unit),
+        hasActions: !!(settlement || barracks || canBuildHere || canTrade || unit || canFormArmy || canSplitArmy),
         html
       };
     }
@@ -1640,7 +1784,8 @@
       const bits = [];
 
       if (unit) {
-        bits.push(`Unit: ${unit.owner} ${unit.type} (HP ${unit.hp}/${unit.maxHp}, Moves ${unit.moves}/${unit.maxMoves}, ATK ${unit.atk}) @ ${unit.q},${unit.r}`);
+        const extra = unit.type === 'army' ? `, Members ${unit.members?.length || 0}` : '';
+        bits.push(`Unit: ${unit.owner} ${unit.type} (HP ${unit.hp}/${unit.maxHp}, Moves ${unit.moves}/${unit.maxMoves}, ATK ${unit.atk}${extra}) @ ${unit.q},${unit.r}`);
       }
 
       if (hex) {
@@ -1652,9 +1797,10 @@
 
       if (unit && unit.owner === 'player') {
         const options = ['Move to an adjacent hex', 'Build on selected explored hex'];
-        if (unit.type === 'scout') options.push('Scout sight reveals tiles 2 hexes away');
-        if (unit.type === 'civilian') options.push('Auto-collects resources on End Turn');
-        if (unit.type === 'defender') options.push('Very high hit points');
+        if (unitHasType(unit, 'scout')) options.push('Scout sight reveals tiles 2 hexes away');
+        if (unitHasType(unit, 'civilian')) options.push('Auto-collects resources on End Turn');
+        if (unitHasType(unit, 'defender')) options.push('Very high hit points');
+        if (unit.type === 'army') options.push(`Army contains ${unit.members.length} units and can be split`);
         if (getUnitAt(unit.q, unit.r, 'ally')) options.push('Trade button available');
         unitOptionsEl.textContent = 'Options: ' + options.join(' • ');
       } else {
@@ -1672,7 +1818,7 @@
       const hostiles = hostileUnits().length;
       const villages = structureCount('village');
       const cities = structureCount('city');
-      const population = playerUnits().length;
+      const population = playerPopulationUsed();
       const popCap = playerPopulationCap();
       statusEl.innerHTML = `Weather: <strong>${game.weather}</strong><br/>Explored: ${progress.explored}/${progress.total} (${progress.pct}%) | Hostiles: ${hostiles} | Villages: ${villages} | Cities: ${cities} | Pop: ${population}/${popCap} | Tech: ${game.tech}`;
 
@@ -1795,6 +1941,16 @@
 
       if (action === 'upgrade-city') {
         upgradeVillageToCity();
+        return;
+      }
+
+      if (action === 'form-army') {
+        formArmyAtSelectedHex();
+        return;
+      }
+
+      if (action === 'split-army') {
+        splitSelectedArmy();
         return;
       }
 
