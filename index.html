@@ -126,6 +126,41 @@
       transition: opacity 130ms ease, transform 130ms ease;
     }
 
+    .unit-stats-panel {
+      position: absolute;
+      z-index: 9;
+      width: 260px;
+      background: rgba(8, 13, 20, 0.94);
+      border: 1px solid #5a7ab4;
+      border-radius: 10px;
+      padding: 10px;
+      box-shadow: 0 14px 30px rgba(0,0,0,0.5);
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-6px);
+      transition: opacity 130ms ease, transform 130ms ease;
+    }
+
+    .unit-stats-panel.show {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+
+    .unit-stats-title {
+      font-size: 0.86rem;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #a8c3ff;
+      margin-bottom: 6px;
+    }
+
+    .unit-stats-row {
+      font-size: 0.84rem;
+      margin-bottom: 4px;
+      color: #d6e4ff;
+    }
+
     .action-popup.show {
       opacity: 1;
       pointer-events: auto;
@@ -260,6 +295,7 @@
         <div id="announcementLine2" class="announcement-line"></div>
       </div>
       <div id="actionPopup" class="action-popup"></div>
+      <div id="unitStatsPanel" class="unit-stats-panel"></div>
       <canvas id="gameCanvas" width="1400" height="950"></canvas>
     </main>
   </div>
@@ -275,12 +311,14 @@
     const unitOptionsEl = document.getElementById('unitOptionsEl');
     const contextActionsEl = document.getElementById('contextActionsEl');
     const actionPopupEl = document.getElementById('actionPopup');
+    const unitStatsPanelEl = document.getElementById('unitStatsPanel');
     const canvasWrapEl = document.getElementById('canvasWrap');
     const logEl = document.getElementById('logEl');
     const turnAnnouncementEl = document.getElementById('turnAnnouncement');
     const announcementLine1El = document.getElementById('announcementLine1');
     const announcementLine2El = document.getElementById('announcementLine2');
     let announcementHideTimer = null;
+    let inspectedUnitId = null;
 
     const tradeBtn = document.getElementById('tradeBtn');
     const endTurnBtn = document.getElementById('endTurnBtn');
@@ -1087,6 +1125,11 @@
       if (before !== game.units.length) {
         log('Units were lost in conflict.', 'bad');
       }
+
+      if (inspectedUnitId && !game.units.some(u => u.id === inspectedUnitId)) {
+        inspectedUnitId = null;
+        hideUnitStatsPanel();
+      }
     }
 
     function structureProductionPhase() {
@@ -1669,6 +1712,19 @@
     }
 
     function drawUnits() {
+      const glyphByType = {
+        scout: 'S',
+        civilian: 'C',
+        soldier: '⚔',
+        archer: 'A',
+        ranger: 'R',
+        defender: 'D',
+        raider: 'R',
+        beast: 'B',
+        ally: 'T',
+        army: '⚑'
+      };
+
       for (const u of game.units) {
         const tile = game.map.get(key(u.q, u.r));
         if (!tile?.explored && !tile?.visible) continue;
@@ -1679,7 +1735,8 @@
         if (u.owner === 'hostile') color = '#ff3d3d';
         if (u.owner === 'ally') color = '#59a3ff';
 
-        const radius = u.type === 'army' ? 11 : 8;
+        const radius = u.type === 'army' ? 11 : 9;
+        const hpPct = Math.max(0, Math.min(1, u.maxHp > 0 ? u.hp / u.maxHp : 0));
 
         ctx.shadowColor = color;
         ctx.shadowBlur = u.owner === 'player' ? 12 : 8;
@@ -1689,27 +1746,35 @@
         ctx.fill();
 
         ctx.shadowBlur = 0;
-        ctx.fillStyle = 'rgba(255,255,255,0.75)';
-        ctx.beginPath();
-        ctx.arc(x - 2.2, y - 2.2, 2.2, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.font = u.type === 'soldier' || u.type === 'army' ? 'bold 11px sans-serif' : 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(glyphByType[u.type] || '?', x, y + 3);
 
         if (u.type === 'army') {
           ctx.fillStyle = '#08210f';
-          ctx.font = 'bold 10px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(String(Math.min(99, u.members?.length || 0)), x, y + 3);
+          ctx.font = 'bold 9px sans-serif';
+          ctx.fillText(String(Math.min(99, u.members?.length || 0)), x, y + 14);
         }
 
-        if (u.owner === 'player' && u.id === game.selectedUnitId) {
+        const barW = radius * 2.2;
+        const barH = 3;
+        const barX = x - barW / 2;
+        const barY = y - radius - 8;
+        ctx.fillStyle = 'rgba(20,20,20,0.72)';
+        ctx.fillRect(barX, barY, barW, barH);
+        ctx.fillStyle = hpPct > 0.5 ? '#66e07e' : (hpPct > 0.25 ? '#e7c869' : '#ff6f6f');
+        ctx.fillRect(barX, barY, barW * hpPct, barH);
+
+        if ((u.owner === 'player' && u.id === game.selectedUnitId) || (inspectedUnitId === u.id)) {
           ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 2;
+          ctx.lineWidth = 1.8;
           ctx.beginPath();
           ctx.arc(x, y, radius + 5, 0, Math.PI * 2);
           ctx.stroke();
 
-          ctx.strokeStyle = 'rgba(31,255,115,0.8)';
-          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = 'rgba(166, 212, 255, 0.9)';
+          ctx.lineWidth = 1.4;
           ctx.beginPath();
           ctx.arc(x, y, radius + 8, 0, Math.PI * 2);
           ctx.stroke();
@@ -1895,6 +1960,71 @@
       actionPopupEl.classList.remove('show');
     }
 
+    function showUnitStatsPanel(unit, clientX, clientY) {
+      if (!unit) {
+        unitStatsPanelEl.classList.remove('show');
+        return;
+      }
+
+      const members = unitMembers(unit);
+      const traitBits = [];
+      if (unitHasType(unit, 'scout')) traitBits.push('Scout vision');
+      if (unitHasType(unit, 'civilian')) traitBits.push('Resource gather');
+      if (unitHasType(unit, 'defender')) traitBits.push('High durability');
+      if (unitHasType(unit, 'archer')) traitBits.push('Ranged support');
+      if (unit.type === 'army') traitBits.push(`Army stack (${members.length} units)`);
+
+      const html = `
+        <div class="unit-stats-title">${capitalize(unit.owner)} ${unit.type}</div>
+        <div class="unit-stats-row">Health: ${Math.max(0, Math.floor(unit.hp))}/${Math.max(1, Math.floor(unit.maxHp))}</div>
+        <div class="unit-stats-row">Damage: ${Math.max(1, Math.floor(unit.atk))}</div>
+        <div class="unit-stats-row">Movement: ${Math.max(0, unit.moves)}/${Math.max(1, unit.maxMoves)}</div>
+        <div class="unit-stats-row">Population cost: ${unitPopulationCost(unit)}</div>
+        <div class="unit-stats-row">Traits: ${traitBits.length ? traitBits.join(' • ') : 'None'}</div>
+        ${unit.type === 'army' ? `<div class="unit-stats-row">Members: ${members.map(m => capitalize(m.type)).join(', ')}</div>` : ''}
+      `;
+
+      unitStatsPanelEl.innerHTML = html;
+
+      const wrapRect = canvasWrapEl.getBoundingClientRect();
+      let left = clientX - wrapRect.left + 14;
+      let top = clientY - wrapRect.top - 10;
+      unitStatsPanelEl.style.left = left + 'px';
+      unitStatsPanelEl.style.top = top + 'px';
+      unitStatsPanelEl.classList.add('show');
+
+      const panelRect = unitStatsPanelEl.getBoundingClientRect();
+      const overflowRight = panelRect.right - wrapRect.right;
+      const overflowBottom = panelRect.bottom - wrapRect.bottom;
+      if (overflowRight > 0) left -= overflowRight + 10;
+      if (overflowBottom > 0) top -= overflowBottom + 10;
+
+      unitStatsPanelEl.style.left = Math.max(8, left) + 'px';
+      unitStatsPanelEl.style.top = Math.max(8, top) + 'px';
+    }
+
+    function hideUnitStatsPanel() {
+      unitStatsPanelEl.classList.remove('show');
+    }
+
+    function refreshUnitStatsPanel() {
+      if (!inspectedUnitId) {
+        hideUnitStatsPanel();
+        return;
+      }
+
+      const inspected = game.units.find(u => u.id === inspectedUnitId);
+      if (!inspected) {
+        inspectedUnitId = null;
+        hideUnitStatsPanel();
+        return;
+      }
+
+      const wrapRect = canvasWrapEl.getBoundingClientRect();
+      const anchor = axialToPixel(inspected.q, inspected.r);
+      showUnitStatsPanel(inspected, wrapRect.left + anchor.x, wrapRect.top + anchor.y);
+    }
+
     function updateContextActions() {
       const context = getContextActionMarkup(game.selectedHex);
       contextActionsEl.innerHTML = context.hasActions
@@ -1903,7 +2033,7 @@
     }
 
     function updateSelectionInfo() {
-      const unit = game.units.find(u => u.id === game.selectedUnitId);
+      const unit = game.units.find(u => u.id === (inspectedUnitId ?? game.selectedUnitId));
       const hex = game.selectedHex;
       const bits = [];
 
@@ -1960,6 +2090,7 @@
         .join('');
 
       updateSelectionInfo();
+      refreshUnitStatsPanel();
     }
 
     function capitalize(str) {
@@ -1985,20 +2116,27 @@
 
       if (!game.map.has(key(hex.q, hex.r))) {
         hideActionPopup();
+        hideUnitStatsPanel();
+        inspectedUnitId = null;
         return;
       }
       game.selectedHex = hex;
 
-      const clickedPlayer = getUnitAt(hex.q, hex.r, 'player');
-      if (clickedPlayer) {
-        game.selectedUnitId = clickedPlayer.id;
+      const clickedUnit = getUnitAt(hex.q, hex.r);
+      if (clickedUnit) {
+        inspectedUnitId = clickedUnit.id;
+        game.selectedUnitId = clickedUnit.owner === 'player' ? clickedUnit.id : null;
         updateUI();
         render();
+        showUnitStatsPanel(clickedUnit, event.clientX, event.clientY);
         const context = getContextActionMarkup(hex);
         if (context.hasActions) showActionPopup(event.clientX, event.clientY, context.html);
         else hideActionPopup();
         return;
       }
+
+      hideUnitStatsPanel();
+      inspectedUnitId = null;
 
       const selected = game.units.find(u => u.id === game.selectedUnitId && u.owner === 'player');
       if (selected) {
@@ -2105,8 +2243,13 @@
 
     document.addEventListener('click', (event) => {
       const insidePopup = actionPopupEl.contains(event.target);
+      const insideStats = unitStatsPanelEl.contains(event.target);
       const onCanvas = event.target === canvas;
       if (!insidePopup && !onCanvas) hideActionPopup();
+      if (!insideStats && !onCanvas) {
+        hideUnitStatsPanel();
+        inspectedUnitId = null;
+      }
     });
 
     tradeBtn.addEventListener('click', tradeWithAlly);
