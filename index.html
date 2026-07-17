@@ -311,17 +311,16 @@
     ];
 
     const terrainDefs = {
-      grass: { color: '#2f7e39', detail: '#77c781', min: 24, max: 70 }
+      grassland: { color: '#4b9e57', detail: '#9fe0a1', resource: 'food', min: 26, max: 72 },
+      forest: { color: '#2f7b42', detail: '#8fd09f', resource: 'wood', min: 30, max: 82 },
+      hills: { color: '#88a06a', detail: '#c6d8a7', resource: 'stone', min: 18, max: 62 },
+      mountain: { color: '#8f9298', detail: '#d3d7de', resource: 'stone', min: 28, max: 84 },
+      wetlands: { color: '#4f8576', detail: '#9ecfbe', resource: 'herbs', min: 20, max: 64 },
+      badlands: { color: '#9a7b61', detail: '#d2b29a', resource: 'iron', min: 16, max: 56 },
+      crystal_fields: { color: '#6e6cab', detail: '#c6c0ff', resource: 'crystal', min: 12, max: 46 }
     };
 
-    const resourceWeights = [
-      { type: 'food', weight: 34, min: 24, max: 72 },
-      { type: 'wood', weight: 26, min: 20, max: 66 },
-      { type: 'stone', weight: 17, min: 16, max: 54 },
-      { type: 'iron', weight: 11, min: 12, max: 42 },
-      { type: 'herbs', weight: 8, min: 12, max: 40 },
-      { type: 'crystal', weight: 4, min: 8, max: 28 }
-    ];
+    const terrainTypes = Object.keys(terrainDefs);
     const resourceTypes = ['food', 'wood', 'stone', 'iron', 'crystal', 'herbs'];
 
     const game = {
@@ -350,6 +349,7 @@
     };
 
     let animationLoopStarted = false;
+    let biomeSeeds = [];
 
     function key(q, r) {
       return `${q},${r}`;
@@ -363,28 +363,90 @@
       return Math.floor(Math.random() * (max - min + 1)) + min;
     }
 
-    function createTerrainNode() {
-      return { terrain: 'grass' };
+    function generateBiomeSeeds() {
+      const seedCount = 10;
+      biomeSeeds = [];
+      for (let i = 0; i < seedCount; i++) {
+        const seedTile = randomMapTile();
+        if (!seedTile) continue;
+        biomeSeeds.push({
+          q: seedTile.q,
+          r: seedTile.r,
+          terrain: randomChoice(terrainTypes)
+        });
+      }
     }
 
-    function assignResourceByTerrain(tile) {
-      const totalWeight = resourceWeights.reduce((sum, item) => sum + item.weight, 0);
-      let roll = Math.random() * totalWeight;
-      let picked = resourceWeights[0];
-      for (const item of resourceWeights) {
-        roll -= item.weight;
-        if (roll <= 0) {
-          picked = item;
-          break;
+    function createTerrainNode(q, r) {
+      if (!biomeSeeds.length) {
+        return { terrain: randomChoice(terrainTypes) };
+      }
+
+      let nearest = biomeSeeds[0];
+      let nearestScore = distance({ q, r }, nearest);
+      for (const seed of biomeSeeds) {
+        const jitter = ((q * 17 + r * 23 + seed.q * 11 + seed.r * 13) % 7) * 0.08;
+        const score = distance({ q, r }, seed) + jitter;
+        if (score < nearestScore) {
+          nearestScore = score;
+          nearest = seed;
         }
       }
 
-      tile.resource = picked.type;
-      tile.resourceAmount = randInt(picked.min, picked.max);
+      return { terrain: nearest.terrain };
+    }
+
+    function assignResourceByTerrain(tile) {
+      const def = terrainDefs[tile.terrain] || terrainDefs.grassland;
+      let resource = def.resource;
+      let resourceAmount = randInt(def.min, def.max);
+
+      if (tile.terrain === 'mountain' && Math.random() < 0.3) {
+        resource = 'iron';
+        resourceAmount = randInt(18, 58);
+      }
+      if (tile.terrain === 'wetlands' && Math.random() < 0.22) {
+        resource = 'food';
+        resourceAmount = randInt(20, 52);
+      }
+      if (tile.terrain === 'badlands' && Math.random() < 0.18) {
+        resource = 'stone';
+        resourceAmount = randInt(18, 50);
+      }
+
+      tile.resource = resource;
+      tile.resourceAmount = resourceAmount;
     }
 
     function smoothBiomes() {
-      // Map is intentionally uniform grass now.
+      for (let pass = 0; pass < 5; pass++) {
+        const updates = [];
+        for (const tile of game.map.values()) {
+          const counts = {};
+          for (const n of neighbors(tile.q, tile.r)) {
+            const nt = game.map.get(key(n.q, n.r));
+            if (!nt) continue;
+            counts[nt.terrain] = (counts[nt.terrain] || 0) + 1;
+          }
+
+          let dominant = tile.terrain;
+          let dominantCount = 0;
+          for (const [terrain, count] of Object.entries(counts)) {
+            if (count > dominantCount) {
+              dominant = terrain;
+              dominantCount = count;
+            }
+          }
+
+          if (dominantCount >= 4 && dominant !== tile.terrain) {
+            updates.push({ tile, terrain: dominant });
+          }
+        }
+
+        for (const update of updates) {
+          update.tile.terrain = update.terrain;
+        }
+      }
     }
 
     function log(message, cls = '') {
@@ -477,14 +539,12 @@
         const r1 = Math.max(-MAP_RADIUS, -q - MAP_RADIUS);
         const r2 = Math.min(MAP_RADIUS, -q + MAP_RADIUS);
         for (let r = r1; r <= r2; r++) {
-          const node = createTerrainNode();
-
           game.map.set(key(q, r), {
             q,
             r,
             explored: false,
             visible: false,
-            terrain: node.terrain,
+            terrain: 'grassland',
             resource: null,
             resourceAmount: 0,
             ruin: Math.random() < 0.09,
@@ -493,6 +553,10 @@
         }
       }
 
+      generateBiomeSeeds();
+      for (const tile of game.map.values()) {
+        tile.terrain = createTerrainNode(tile.q, tile.r).terrain;
+      }
       smoothBiomes();
       for (const tile of game.map.values()) assignResourceByTerrain(tile);
 
@@ -1432,18 +1496,78 @@
     }
 
     function drawTerrainDetails(tile, x, y, isOccupied) {
-      const def = terrainDefs[tile.terrain] || terrainDefs.grass;
-      const detailColor = isOccupied ? adjustHexColor(def.detail, 10) : adjustHexColor(def.detail, -24);
+      const def = terrainDefs[tile.terrain] || terrainDefs.grassland;
+      const detailColor = isOccupied ? adjustHexColor(def.detail, 8) : adjustHexColor(def.detail, -22);
       ctx.strokeStyle = detailColor;
-      ctx.lineWidth = 1.5;
+      ctx.fillStyle = detailColor;
+      ctx.lineWidth = 1.4;
 
-      for (let i = 0; i < 4; i++) {
-        const ox = -9 + i * 6;
-        const h = 4 + (i % 2) * 2;
-        ctx.beginPath();
-        ctx.moveTo(x + ox, y + 6);
-        ctx.quadraticCurveTo(x + ox + 1, y - h, x + ox + 3, y + 5);
-        ctx.stroke();
+      switch (tile.terrain) {
+        case 'grassland':
+          for (let i = 0; i < 4; i++) {
+            const ox = -9 + i * 6;
+            const h = 4 + (i % 2) * 2;
+            ctx.beginPath();
+            ctx.moveTo(x + ox, y + 6);
+            ctx.quadraticCurveTo(x + ox + 1, y - h, x + ox + 3, y + 5);
+            ctx.stroke();
+          }
+          break;
+        case 'forest':
+          for (let i = 0; i < 4; i++) {
+            ctx.beginPath();
+            ctx.arc(x - 8 + i * 5, y + ((i % 2) ? -3 : 1), 2.4, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          break;
+        case 'hills':
+          ctx.beginPath();
+          ctx.arc(x - 5, y + 4, 4.5, Math.PI, Math.PI * 2);
+          ctx.arc(x + 4, y + 3, 5.5, Math.PI, Math.PI * 2);
+          ctx.stroke();
+          break;
+        case 'mountain':
+          ctx.beginPath();
+          ctx.moveTo(x - 8, y + 6);
+          ctx.lineTo(x - 1, y - 8);
+          ctx.lineTo(x + 4, y + 2);
+          ctx.lineTo(x + 9, y - 6);
+          ctx.lineTo(x + 10, y + 6);
+          ctx.stroke();
+          break;
+        case 'wetlands':
+          ctx.beginPath();
+          ctx.moveTo(x - 10, y + 3);
+          ctx.quadraticCurveTo(x - 1, y -7, x + 9, y + 2);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(x - 7, y + 7);
+          ctx.lineTo(x - 7, y -1);
+          ctx.moveTo(x + 2, y + 7);
+          ctx.lineTo(x + 2, y -3);
+          ctx.stroke();
+          break;
+        case 'badlands':
+          ctx.beginPath();
+          ctx.moveTo(x - 10, y + 5);
+          ctx.lineTo(x - 3, y -2);
+          ctx.lineTo(x + 3, y + 1);
+          ctx.lineTo(x + 10, y -4);
+          ctx.stroke();
+          break;
+        case 'crystal_fields':
+          for (let i = 0; i < 3; i++) {
+            const ox = -6 + i * 6;
+            ctx.beginPath();
+            ctx.moveTo(x + ox, y + 6);
+            ctx.lineTo(x + ox + 2, y -4);
+            ctx.lineTo(x + ox + 5, y + 6);
+            ctx.closePath();
+            ctx.stroke();
+          }
+          break;
+        default:
+          break;
       }
     }
 
