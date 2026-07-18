@@ -523,7 +523,7 @@
                     <div class="campaign-level-desc">Unlocks after future updates.</div>
                   </button>
                 </div>
-                <div class="tech-tree-note">Reward for Level 1: unlock Deep Crystal Mine + Technology Tree Core (Exploration/Combat/Kingdom branches placeholder).</div>
+                <div class="tech-tree-note">Reward for Level 1: unlock Crystal Mine + Research Lab (Exploration/Combat/Kingdom branches placeholder).</div>
               </div>
             </div>
             <button id="menuStartBtn" style="width:100%; margin-top:10px;">Start</button>
@@ -622,7 +622,7 @@
     };
 
     const terrainTypes = Object.keys(terrainDefs).filter(t => t !== 'ocean');
-    const resourceTypes = ['food', 'wood', 'stone', 'iron', 'crystal', 'herbs'];
+    const resourceTypes = ['crystal'];
     // Campgain tuning knobs: keep here for easy balancing tweaks.
     const CAMPAIGN_LEVEL_ONE_TUNING = {
       start: { q: 0, r: 0 },
@@ -684,12 +684,12 @@
         tornadoes: []
       },
       resources: {
-        food: 80,
-        wood: 70,
-        stone: 40,
-        iron: 20,
-        crystal: 10,
-        herbs: 15
+        food: 0,
+        wood: 0,
+        stone: 0,
+        iron: 0,
+        crystal: 60,
+        herbs: 0
       }
     };
 
@@ -1178,12 +1178,12 @@
       };
       game.weatherVisuals = { tornadoes: [] };
       game.resources = {
-        food: 80,
-        wood: 70,
-        stone: 40,
-        iron: 20,
-        crystal: 10,
-        herbs: 15
+        food: 0,
+        wood: 0,
+        stone: 0,
+        iron: 0,
+        crystal: 60,
+        herbs: 0
       };
 
       inspectedUnitId = null;
@@ -1201,23 +1201,23 @@
         startQ = landing.q;
         startR = landing.r;
         game.resources = {
-          food: 120,
-          wood: 90,
-          stone: 55,
-          iron: 30,
-          crystal: 12,
-          herbs: 20
+          food: 0,
+          wood: 0,
+          stone: 0,
+          iron: 0,
+          crystal: 90,
+          herbs: 0
         };
       } else if (game.mode === 'campaign_level_1') {
         startQ = CAMPAIGN_LEVEL_ONE_TUNING.start.q;
         startR = CAMPAIGN_LEVEL_ONE_TUNING.start.r;
         game.resources = {
-          food: 150,
-          wood: 100,
-          stone: 70,
-          iron: 90,
-          crystal: 20,
-          herbs: 30
+          food: 0,
+          wood: 0,
+          stone: 0,
+          iron: 0,
+          crystal: 120,
+          herbs: 0
         };
       } else {
         const shoreStart = randomMapTile(tile => isShoreTile(tile));
@@ -1443,13 +1443,13 @@
     function recruit(type, sourceHex = null) {
       if (game.gameOver) return;
       const costs = {
-        scout: { food: 12, wood: 8 },
-        civilian: { food: 14, wood: 6 },
-        soldier: { food: 20, iron: 12, wood: 8 },
-        archer: { food: 18, wood: 16, iron: 10 },
-        ranger: { food: 24, wood: 14, herbs: 8, iron: 8 },
-        defender: { food: 28, wood: 14, stone: 18, iron: 16 },
-        knight: { food: 30, wood: 10, iron: 20, herbs: 10 }
+        scout: { crystal: 10 },
+        civilian: { crystal: 12 },
+        soldier: { crystal: 18 },
+        archer: { crystal: 20 },
+        ranger: { crystal: 24 },
+        defender: { crystal: 28 },
+        knight: { crystal: 32 }
       };
 
       const trainingSiteByUnit = {
@@ -1528,7 +1528,7 @@
         return;
       }
 
-      const cost = { wood: 50, stone: 60, iron: 30, crystal: 12 };
+      const cost = { crystal: 40 };
       if (!canAfford(cost)) {
         log('Not enough resources to upgrade to a city.', 'bad');
         return;
@@ -1647,16 +1647,16 @@
       }
 
       const costs = {
-        village: { wood: 30, stone: 30, crystal: 4 },
-        farm: { wood: 16, stone: 6 },
-        wall: { wood: 10, stone: 18 },
-        archer_tower: { wood: 22, stone: 18, iron: 8 },
-        port: { wood: 30, stone: 10 },
-        lumber_mill: { wood: 20, stone: 12 },
-        quarry: { wood: 14, stone: 14, iron: 4 },
-        barracks: { wood: 26, stone: 18, iron: 12 },
-        deep_crystal_mine: { wood: 26, stone: 26, iron: 18, crystal: 8 },
-        tech_tree_core: { wood: 18, stone: 22, iron: 14, crystal: 14 }
+        village: { crystal: 28 },
+        farm: { crystal: 14 },
+        wall: { crystal: 16 },
+        archer_tower: { crystal: 26 },
+        port: { crystal: 22 },
+        lumber_mill: { crystal: 18 },
+        quarry: { crystal: 18 },
+        barracks: { crystal: 30 },
+        deep_crystal_mine: { crystal: 34 },
+        tech_tree_core: { crystal: 44 }
       };
 
       const hpByType = {
@@ -1682,7 +1682,7 @@
         quarry: 'quarry',
         barracks: 'barracks',
         deep_crystal_mine: 'deep crystal mine',
-        tech_tree_core: 'technology tree core'
+        tech_tree_core: 'research lab'
       };
 
       const cost = costs[type];
@@ -1693,12 +1693,12 @@
       }
 
       if (type === 'deep_crystal_mine' && !campaignProgress.unlockCrystalMine) {
-        log('Deep Crystal Mine is locked. Complete Campaign Level 1 to unlock it.', 'warn');
+        log('Crystal Mine is locked. Complete Campaign Level 1 to unlock it.', 'warn');
         return;
       }
 
       if (type === 'tech_tree_core' && !campaignProgress.unlockTechTree) {
-        log('Technology Tree Core is locked. Complete Campaign Level 1 to unlock it.', 'warn');
+        log('Research Lab is locked. Complete Campaign Level 1 to unlock it.', 'warn');
         return;
       }
 
@@ -1730,7 +1730,7 @@
       }
 
       if (type === 'tech_tree_core' && game.structures.some(s => s.type === 'tech_tree_core')) {
-        log('You already have a Technology Tree Core. Only one can exist.', 'warn');
+        log('You already have a Research Lab. Only one can exist.', 'warn');
         return;
       }
 
@@ -1747,8 +1747,8 @@
         log('Technology Tree is still locked. Complete Campaign Level 1 first.', 'warn');
         return;
       }
-      log('Tech Tree opened: Center Core connects to three future branches -> Exploration, Combat, Kingdom.', 'good');
-      log('Branches are placeholders for now. Future levels will add research nodes.', 'warn');
+      log('Research Lab opened: core branches -> Exploration, Combat, Kingdom.', 'good');
+      log('Branches are placeholders for now. Future levels will add deeper research nodes.', 'warn');
     }
 
     function tradeWithAlly() {
@@ -1765,11 +1765,11 @@
         return;
       }
 
-      const lootType = randomChoice(resourceTypes);
-      const amount = randInt(12, 30);
-      game.resources[lootType] += amount;
-      if (Math.random() < 0.35) game.tech += 1;
-      log(`Trade complete: +${amount} ${lootType}${Math.random() < 0.35 ? ' and +1 technology' : ''}.`, 'good');
+      const amount = randInt(16, 34);
+      game.resources.crystal += amount;
+      const techBonus = Math.random() < 0.35;
+      if (techBonus) game.tech += 1;
+      log(`Trade complete: +${amount} crystal${techBonus ? ' and +1 technology' : ''}.`, 'good');
       ally.hp = 0; // ally leaves after trade
       cleanupDeadUnits();
       updateUI();
@@ -1795,33 +1795,18 @@
         return;
       }
 
-      const tradable = resourceTypes
-        .map(type => ({ type, amount: game.resources[type] }))
-        .sort((a, b) => b.amount - a.amount);
-
-      const give = tradable.find(entry => entry.amount >= 20);
-      if (!give) {
-        log('You need at least 20 of any resource to trade at the capital port.', 'warn');
+      const tradeCost = 25;
+      if (game.resources.crystal < tradeCost) {
+        log(`You need at least ${tradeCost} crystal to trade at the capital port.`, 'warn');
         return;
       }
 
-      const receive = [...tradable]
-        .reverse()
-        .find(entry => entry.type !== give.type);
-
-      if (!receive) {
-        log('No valid trader exchange could be found this turn.', 'warn');
-        return;
-      }
-
-      const giveAmount = Math.max(20, Math.min(60, Math.floor(give.amount * 0.3)));
-      const receiveAmount = Math.max(16, Math.floor(giveAmount * 0.9) + randInt(6, 14));
-
-      game.resources[give.type] -= giveAmount;
-      game.resources[receive.type] += receiveAmount;
+      const payout = randInt(32, 58);
+      game.resources.crystal -= tradeCost;
+      game.resources.crystal += payout;
       game.lastCapitalTradeTurn = game.turn;
 
-      log(`Capital port traders exchanged ${giveAmount} ${give.type} for ${receiveAmount} ${receive.type}.`, 'good');
+      log(`Capital port traders refined precious metals: -${tradeCost} crystal input, +${payout} crystal output.`, 'good');
       updateUI();
       render();
     }
@@ -1854,12 +1839,9 @@
       game.campaign.coastalLandingSecured = true;
 
       if (game.campaignStyle === 'siege') {
-        game.resources.stone += 20;
-        game.resources.iron += 16;
+        game.resources.crystal += 40;
       } else {
-        game.resources.food += 24;
-        game.resources.wood += 18;
-        game.resources.herbs += 10;
+        game.resources.crystal += 50;
       }
 
       log(`Ethus city captured: ${city.name || 'Unknown city'} (${game.campaign.capturedCities}/${game.campaign.totalCities}).`, 'good');
@@ -1985,49 +1967,26 @@
     }
 
     function structureProductionPhase() {
-      const farms = structureCount('farm');
-      const ports = structureCount('port');
-      const mills = structureCount('lumber_mill');
-      const quarries = structureCount('quarry');
-      const crystalMines = structureCount('deep_crystal_mine');
-      const capitals = game.structures.filter(s => s.type === 'capital');
-      const population = playerPopulationUsed();
+      const crystalMines = structureCount('deep_crystal_mine', 'player');
+      const researchLabs = structureCount('tech_tree_core', 'player');
+      const capitals = structureCount('capital', 'player');
 
-      // Increased output so production buildings generate resources faster.
-      const farmFood = farms * 14;
-      const portFood = ports * 6;
-      const portWood = ports * 4;
-      const millWood = mills * 10;
-      const quarryStone = quarries * 10;
-      const mineCrystal = crystalMines * 8;
-
-      if (farmFood) game.resources.food += farmFood;
-      if (portFood) game.resources.food += portFood;
-      if (portWood) game.resources.wood += portWood;
-      if (millWood) game.resources.wood += millWood;
-      if (quarryStone) game.resources.stone += quarryStone;
-      if (mineCrystal) game.resources.crystal += mineCrystal;
-
-      if (farms || ports || mills || quarries || crystalMines) {
-        log(`Production surge: +${farmFood + portFood} food, +${millWood + portWood} wood, +${quarryStone} stone, +${mineCrystal} crystal.`, 'good');
+      let mineHits = 0;
+      let mineCrystal = 0;
+      for (let i = 0; i < crystalMines; i++) {
+        if (Math.random() < 0.03) {
+          mineHits++;
+          mineCrystal += randInt(40, 70);
+        }
       }
 
-      if (capitals.length) {
-        const food = capitals.length * (12 + population * 4);
-        const wood = capitals.length * (8 + population * 3);
-        const stone = capitals.length * (6 + population * 2);
-        const iron = capitals.length * (4 + Math.floor(population * 1.2));
-        const herbs = capitals.length * (3 + Math.ceil(population / 2));
-        const crystal = capitals.length * (2 + Math.ceil(population / 3));
+      const labCrystal = researchLabs * randInt(24, 36);
+      const capitalCrystal = capitals * 8;
 
-        game.resources.food += food;
-        game.resources.wood += wood;
-        game.resources.stone += stone;
-        game.resources.iron += iron;
-        game.resources.herbs += herbs;
-        game.resources.crystal += crystal;
+      game.resources.crystal += mineCrystal + labCrystal + capitalCrystal;
 
-        log(`Capital output scales with population (${population}): +${food} food, +${wood} wood, +${stone} stone, +${iron} iron, +${herbs} herbs, +${crystal} crystal.`, 'good');
+      if (crystalMines || researchLabs || capitals) {
+        log(`Extraction report: Crystal Mine precious-metal hits ${mineHits}/${crystalMines} (${crystalMines ? '3% chance each' : 'n/a'}) for +${mineCrystal} crystal; Research Lab guaranteed yields +${labCrystal} crystal; Capital reserves +${capitalCrystal} crystal.`, 'good');
       }
     }
 
@@ -2039,29 +1998,18 @@
         const civilianCount = unitTypeCount(u, 'civilian');
         if (civilianCount <= 0) continue;
 
-        const perCivilian = randInt(5, 9) + game.tech;
+        const perCivilian = randInt(4, 8) + Math.floor(game.tech / 2);
         const amount = Math.min(perCivilian * civilianCount, tile.resourceAmount);
-        game.resources[tile.resource] += amount;
+        game.resources.crystal += amount;
         tile.resourceAmount -= amount;
 
         if (tile.resourceAmount <= 0) {
-          log(`${capitalize(tile.resource)} source exhausted on this hex.`, 'warn');
+          log('A precious-metal vein is exhausted on this hex.', 'warn');
         } else {
-          log(`${u.type === 'army' ? 'Army civilians' : 'Civilian'} collected +${amount} ${tile.resource}.`, 'good');
+          log(`${u.type === 'army' ? 'Army civilians' : 'Civilian'} refined +${amount} crystal from local deposits.`, 'good');
         }
       }
 
-      // Food upkeep
-      const upkeep = Math.max(2, Math.floor(playerPopulationUsed() * 1.2));
-      game.resources.food -= upkeep;
-      if (game.resources.food < 0) {
-        game.resources.food = 0;
-        const starving = playerUnits()[0];
-        if (starving) {
-          starving.hp -= 2;
-          log('Food shortage! A unit suffers starvation damage.', 'bad');
-        }
-      }
       cleanupDeadUnits();
     }
 
@@ -2359,7 +2307,7 @@
           game.gameOver = true;
           statusEl.innerHTML = '<span class="good">Victory! Shadow Lair reached. Campaign Level 1 complete.</span>';
           log('Victory! Your forces climbed to the Shadow Lair and secured Campaign Level 1.', 'good');
-          log('Unlock earned: Deep Crystal Mine + Technology Tree Core.', 'good');
+          log('Unlock earned: Crystal Mine + Research Lab.', 'good');
           return true;
         }
       }
@@ -2939,7 +2887,7 @@
            </div>`
         : '';
 
-      const techTreeCore = getStructureAt(hex.q, hex.r, 'tech_tree_core');
+      const researchLab = getStructureAt(hex.q, hex.r, 'tech_tree_core');
       const unlockedBuildButtons = [
         '<button data-action="build-village">Village</button>',
         '<button data-action="build-farm">Farm</button>',
@@ -2950,16 +2898,16 @@
         '<button data-action="build-quarry">Quarry</button>',
         '<button data-action="build-barracks">Barracks</button>'
       ];
-      if (campaignProgress.unlockCrystalMine) unlockedBuildButtons.push('<button data-action="build-deep_crystal_mine">Deep Crystal Mine</button>');
-      if (campaignProgress.unlockTechTree) unlockedBuildButtons.push('<button data-action="build-tech_tree_core">Tech Tree Core</button>');
+      if (campaignProgress.unlockCrystalMine) unlockedBuildButtons.push('<button data-action="build-deep_crystal_mine">Crystal Mine</button>');
+      if (campaignProgress.unlockTechTree) unlockedBuildButtons.push('<button data-action="build-tech_tree_core">Research Lab</button>');
 
       const buildButtons = canBuildHere
         ? `<div class="small" style="margin:8px 0 4px;">Build on this explored hex:</div>
            <div class="btn-row">${unlockedBuildButtons.join('')}</div>`
         : '<div class="small" style="margin-top:8px;">Build options appear on explored hexes.</div>';
 
-      const techTreeButton = techTreeCore
-        ? '<div style="margin-top:8px;"><button data-action="open-tech-tree">Open Tech Tree</button></div>'
+      const techTreeButton = researchLab
+        ? '<div style="margin-top:8px;"><button data-action="open-tech-tree">Open Research Tree</button></div>'
         : '';
 
       const armyButtons = (canFormArmy || canSplitArmy)
@@ -2976,7 +2924,7 @@
 
       const html = `${campaignLevelNote}${unitNotes}${ethusNote}${recruitButtons}${settlementButtons}${barracksButtons}${buildButtons}${techTreeButton}${armyButtons}${tradeButton}${capitalTradeButton}`;
       return {
-        hasActions: !!(settlement || ethusCity || barracks || canBuildHere || canTrade || canCapitalTrade || unit || canFormArmy || canSplitArmy || techTreeCore),
+        hasActions: !!(settlement || ethusCity || barracks || canBuildHere || canTrade || canCapitalTrade || unit || canFormArmy || canSplitArmy || researchLab),
         html
       };
     }
@@ -3140,12 +3088,7 @@
       statusEl.innerHTML = `Mode: <strong>${modeLabel(game.mode)}</strong><br/>Weather: <strong>${game.weather}</strong><br/>Explored: ${progress.explored}/${progress.total} (${progress.pct}%) | Hostiles: ${hostiles} | Capital Cities: ${capitals} | Villages: ${villages} | Cities: ${cities} | Pop: ${population}/${popCap} | Tech: ${game.tech}${kingStatus}${campgainStatus}${campaignLevelStatus}`;
 
       const entries = [
-        ['Food', game.resources.food],
-        ['Wood', game.resources.wood],
-        ['Stone', game.resources.stone],
-        ['Iron', game.resources.iron],
-        ['Crystal', game.resources.crystal],
-        ['Herbs', game.resources.herbs]
+        ['Crystal', game.resources.crystal]
       ];
 
       resourceGrid.innerHTML = entries
