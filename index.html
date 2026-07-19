@@ -2664,12 +2664,7 @@
         if (tile.explored || isVisibleNow) {
           drawTerrainDetails(tile, x, y, hasPlayer || isVisibleNow);
 
-          if (tile.resource && tile.resourceAmount > 0 && (hasPlayer || isVisibleNow)) {
-            ctx.fillStyle = '#102033';
-            ctx.font = 'bold 11px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText(tile.resource[0].toUpperCase(), x, y + 4);
-          }
+          // Terrain labels removed for a cleaner map look.
 
           if (tile.ruin && !tile.ruinVisited && (hasPlayer || isVisibleNow)) {
             ctx.fillStyle = hasPlayer ? '#f2cc60' : '#d9c78f';
@@ -2680,7 +2675,7 @@
           if (tile.slope && (hasPlayer || isVisibleNow)) {
             ctx.fillStyle = '#f3dca8';
             ctx.font = 'bold 12px sans-serif';
-            ctx.fillText('↗', x, y - 10);
+            ctx.fillText('↑', x, y - 10);
           }
         }
 
