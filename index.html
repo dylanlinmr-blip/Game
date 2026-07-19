@@ -1290,26 +1290,15 @@
       }
 
       if (game.mode === 'campaign_level_1') {
-        const lairTile = randomMapTile(tile => tile.terrain !== 'ocean' && distance(tile, { q: startQ, r: startR }) >= 7);
-        if (lairTile) {
-          const slopeHex = setupCampaignLevelOneElevation({ q: lairTile.q, r: lairTile.r }, { q: startQ, r: startR });
-          game.structures.push({
-            type: 'enemy_lair',
-            owner: 'hostile',
-            q: lairTile.q,
-            r: lairTile.r,
-            hp: 40,
-            name: 'Shadow Lair'
-          });
-          game.campaignMission.targetBuilding = { q: lairTile.q, r: lairTile.r };
-          game.campaignMission.slopeHex = slopeHex;
-        }
+        autoMergePlayerUnitsAt(startQ, startR, { silent: true });
 
         for (const tile of game.map.values()) {
           tile.explored = true;
           tile.visible = true;
         }
 
+        game.campaignMission.targetBuilding = null;
+        game.campaignMission.slopeHex = null;
         game.campaignMission.beastsRequired = CAMPAIGN_LEVEL_ONE_TUNING.beastsRequired;
         game.campaignMission.beastsDefeated = 0;
         game.campaignMission.phase = 'hunt';
@@ -1320,11 +1309,8 @@
       log(`Mode: ${modeLabel(game.mode)}.`, 'good');
       if (game.mode === 'campaign_level_1') {
         log('Campaign Level 1 briefing: Beast Hunt.', 'warn');
-        log('Objective 1: Defeat 3 hostile beasts with your starting force (5 Soldiers + 3 Archers).', 'good');
-        log('Objective 2: Reach the elevated Shadow Lair by taking the marked slope route.', 'good');
-        if (game.campaignMission.slopeHex) {
-          log(`Slope route marker identified at ${game.campaignMission.slopeHex.q},${game.campaignMission.slopeHex.r} (⇧).`, 'warn');
-        }
+        log('Mission: defeat 3 hostile beasts. The map is fully explored.', 'good');
+        log('Stealth rule: beasts hiding in forest bushes are invisible until they leave the bush.', 'warn');
       } else {
         log('Your expedition lands on the shore and founds a Capital City with a bustling port.', 'good');
       }
@@ -1354,6 +1340,17 @@
 
     function getUnitsAt(q, r) {
       return game.units.filter(u => u.q === q && u.r === r);
+    }
+
+    function isBushTile(tile) {
+      return !!tile && tile.terrain === 'forest';
+    }
+
+    function isUnitHiddenFromPlayer(unit) {
+      if (!unit || game.mode !== 'campaign_level_1') return false;
+      if (unit.owner !== 'hostile' || unit.type !== 'beast') return false;
+      const tile = game.map.get(key(unit.q, unit.r));
+      return isBushTile(tile);
     }
 
     function isPlayerStructure(structure) {
@@ -1426,6 +1423,10 @@
 
     function hostileUnits() {
       return game.units.filter(u => u.owner === 'hostile');
+    }
+
+    function visibleHostileUnitsForPlayer() {
+      return hostileUnits().filter(u => !isUnitHiddenFromPlayer(u));
     }
 
     function allyUnits() {
@@ -1509,6 +1510,7 @@
 
       spend(cost);
       addUnit(type, 'player', source.q, source.r);
+      autoMergePlayerUnitsAt(source.q, source.r, { silent: true });
       recalculateVisibility();
       log(`${capitalize(type)} trained at the ${source.type}.`, 'good');
       updateUI();
@@ -1570,6 +1572,24 @@
         attackedThisTurn: units.some(u => !!u.attackedThisTurn),
         members
       };
+    }
+
+    function autoMergePlayerUnitsAt(q, r, { silent = false } = {}) {
+      const stack = getUnitsAt(q, r)
+        .filter(u => u.owner === 'player' && u.type !== 'ship');
+
+      if (stack.length < 2) return null;
+
+      const army = createArmyFromUnits(stack);
+      const ids = new Set(stack.map(u => u.id));
+      game.units = game.units.filter(u => !ids.has(u.id));
+      game.units.push(army);
+
+      if (game.selectedUnitId && ids.has(game.selectedUnitId)) game.selectedUnitId = army.id;
+      if (inspectedUnitId && ids.has(inspectedUnitId)) inspectedUnitId = army.id;
+
+      if (!silent) log(`Automatic merge: ${army.members.length} troops formed an army.`, 'good');
+      return army;
     }
 
     function formArmyAtSelectedHex() {
@@ -1889,6 +1909,22 @@
 
       const occupant = getUnitAt(q, r);
       if (occupant && occupant.owner === 'player') {
+        if (unit.moves <= 0) {
+          log('This unit has no movement left this turn.', 'warn');
+          return;
+        }
+
+        unit.q = q;
+        unit.r = r;
+        unit.moves -= 1;
+        const mergedArmy = autoMergePlayerUnitsAt(q, r, { silent: true });
+        if (mergedArmy) {
+          log(`Forces combined automatically into one army (${mergedArmy.members.length} troops).`, 'good');
+        }
+
+        recalculateVisibility();
+        updateUI();
+        render();
         return;
       }
 
@@ -1934,6 +1970,7 @@
         }
 
         tryCampgainCityAction(unit);
+        autoMergePlayerUnitsAt(q, r, { silent: true });
       }
 
       recalculateVisibility();
@@ -2288,28 +2325,16 @@
       const remainingBeasts = hostileUnits().filter(u => u.type === 'beast').length;
       mission.beastsDefeated = Math.max(0, mission.beastsRequired - remainingBeasts);
 
-      if (mission.phase === 'hunt' && mission.beastsDefeated >= mission.beastsRequired) {
-        mission.phase = 'search_lair';
-        if (!mission.huntCompleteAnnounced) {
-          mission.huntCompleteAnnounced = true;
-          log('Objective complete: all 3 hostile beasts defeated.', 'good');
-          log('New objective: reach the elevated Shadow Lair by using the slope path.', 'warn');
-        }
-      }
-
-      if (mission.phase === 'search_lair' && mission.targetBuilding) {
-        const occupyingPlayer = getUnitAt(mission.targetBuilding.q, mission.targetBuilding.r, 'player');
-        if (occupyingPlayer && !mission.victoryAwarded) {
-          mission.victoryAwarded = true;
-          campaignProgress.level1Completed = true;
-          campaignProgress.unlockCrystalMine = true;
-          campaignProgress.unlockTechTree = true;
-          game.gameOver = true;
-          statusEl.innerHTML = '<span class="good">Victory! Shadow Lair reached. Campaign Level 1 complete.</span>';
-          log('Victory! Your forces climbed to the Shadow Lair and secured Campaign Level 1.', 'good');
-          log('Unlock earned: Crystal Mine + Research Lab.', 'good');
-          return true;
-        }
+      if (mission.beastsDefeated >= mission.beastsRequired && !mission.victoryAwarded) {
+        mission.victoryAwarded = true;
+        campaignProgress.level1Completed = true;
+        campaignProgress.unlockCrystalMine = true;
+        campaignProgress.unlockTechTree = true;
+        game.gameOver = true;
+        statusEl.innerHTML = '<span class="good">Victory! All 3 beasts defeated. Campaign Level 1 complete.</span>';
+        log('Objective complete: all 3 hostile beasts defeated.', 'good');
+        log('Unlock earned: Crystal Mine + Research Lab.', 'good');
+        return true;
       }
       return false;
     }
@@ -2351,7 +2376,7 @@
     }
 
     function getThreatSummary() {
-      const hostiles = hostileUnits();
+      const hostiles = visibleHostileUnitsForPlayer();
       const threatenedTargets = [
         ...playerUnits().map(u => ({ q: u.q, r: u.r })),
         ...settlementStructures().map(v => ({ q: v.q, r: v.r }))
@@ -2692,6 +2717,7 @@
       for (const u of game.units) {
         const tile = game.map.get(key(u.q, u.r));
         if (!tile?.explored && !tile?.visible) continue;
+        if (isUnitHiddenFromPlayer(u)) continue;
 
         const { x, y } = axialToPixel(u.q, u.r);
         let color = '#ffffff';
@@ -2860,7 +2886,7 @@
         : '';
 
       const campaignLevelNote = game.mode === 'campaign_level_1'
-        ? `<div class="small" style="margin-bottom:6px; color:#f3d59e;">Mission: ${game.campaignMission.phase === 'hunt' ? `Defeat beasts (${game.campaignMission.beastsDefeated}/${game.campaignMission.beastsRequired})` : 'Climb the slope and reach the elevated Shadow Lair.'}</div>`
+        ? `<div class="small" style="margin-bottom:6px; color:#f3d59e;">Mission: Defeat beasts (${game.campaignMission.beastsDefeated}/${game.campaignMission.beastsRequired}). Bush-hidden beasts are invisible.</div>`
         : '';
 
       const recruitButtons = settlement
@@ -2970,6 +2996,15 @@
       if (unitHasType(unit, 'king')) traitBits.push('Royal guard target');
       if (unit.type === 'army') traitBits.push(`Army stack (${members.length} units)`);
 
+      const memberSummary = unit.type === 'army'
+        ? Object.entries(members.reduce((acc, m) => {
+            acc[m.type] = (acc[m.type] || 0) + 1;
+            return acc;
+          }, {}))
+            .map(([type, count]) => `${capitalize(type)} x${count}`)
+            .join(' • ')
+        : '';
+
       const html = `
         <div class="unit-stats-title">${capitalize(unit.owner)} ${unit.type}</div>
         <div class="unit-stats-row">Health: ${Math.max(0, Math.floor(unit.hp))}/${Math.max(1, Math.floor(unit.maxHp))}</div>
@@ -2978,7 +3013,7 @@
         <div class="unit-stats-row">Attack this turn: ${unit.attackedThisTurn ? 'Used' : 'Ready'}</div>
         <div class="unit-stats-row">Population cost: ${unitPopulationCost(unit)}</div>
         <div class="unit-stats-row">Traits: ${traitBits.length ? traitBits.join(' • ') : 'None'}</div>
-        ${unit.type === 'army' ? `<div class="unit-stats-row">Members: ${members.map(m => capitalize(m.type)).join(', ')}</div>` : ''}
+        ${unit.type === 'army' ? `<div class="unit-stats-row"><strong>Troop Roster:</strong> ${memberSummary}</div><div class="unit-stats-row">All troops in this army: ${members.map(m => capitalize(m.type)).join(', ')}</div>` : ''}
       `;
 
       unitStatsPanelEl.innerHTML = html;
@@ -3069,7 +3104,7 @@
       const progress = exploreProgress();
       turnEl.textContent = game.turn;
 
-      const hostiles = hostileUnits().length;
+      const hostiles = visibleHostileUnitsForPlayer().length;
       const villages = structureCount('village', 'player');
       const cities = structureCount('city', 'player');
       const capitals = structureCount('capital', 'player');
@@ -3083,7 +3118,7 @@
         ? ` | Ethus Cities: ${game.campaign.capturedCities}/${game.campaign.totalCities} | Doctrine: ${capitalize(game.campaignStyle)}`
         : '';
       const campaignLevelStatus = game.mode === 'campaign_level_1'
-        ? ` | Objective: ${game.campaignMission.phase === 'hunt' ? `Defeat beasts (${game.campaignMission.beastsDefeated}/${game.campaignMission.beastsRequired})` : 'Use slope to reach Shadow Lair'}`
+        ? ` | Objective: Defeat beasts (${game.campaignMission.beastsDefeated}/${game.campaignMission.beastsRequired})`
         : '';
       statusEl.innerHTML = `Mode: <strong>${modeLabel(game.mode)}</strong><br/>Weather: <strong>${game.weather}</strong><br/>Explored: ${progress.explored}/${progress.total} (${progress.pct}%) | Hostiles: ${hostiles} | Capital Cities: ${capitals} | Villages: ${villages} | Cities: ${cities} | Pop: ${population}/${popCap} | Tech: ${game.tech}${kingStatus}${campgainStatus}${campaignLevelStatus}`;
 
@@ -3200,7 +3235,7 @@
       game.selectedHex = hex;
 
       const clickedUnit = getUnitAt(hex.q, hex.r);
-      if (clickedUnit) {
+      if (clickedUnit && !isUnitHiddenFromPlayer(clickedUnit)) {
         inspectedUnitId = clickedUnit.id;
         game.selectedUnitId = clickedUnit.owner === 'player' ? clickedUnit.id : null;
         updateUI();
