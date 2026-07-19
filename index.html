@@ -901,6 +901,30 @@
       return true;
     }
 
+    function applyMountainElevationAndSlopes() {
+      for (const tile of game.map.values()) {
+        tile.elevation = tile.terrain === 'mountain' ? 1 : 0;
+        tile.slope = false;
+      }
+
+      const boundaryMountains = Array.from(game.map.values()).filter(tile =>
+        tile.terrain === 'mountain' &&
+        neighbors(tile.q, tile.r).some(n => {
+          const nt = game.map.get(key(n.q, n.r));
+          return nt && nt.terrain !== 'mountain';
+        })
+      );
+
+      for (const tile of boundaryMountains) {
+        const hash = Math.abs(tile.q * 31 + tile.r * 17);
+        if (hash % 4 === 0) tile.slope = true;
+      }
+
+      if (boundaryMountains.length && !boundaryMountains.some(t => t.slope)) {
+        boundaryMountains[0].slope = true;
+      }
+    }
+
     function initMap() {
       updateCameraBounds();
 
@@ -924,11 +948,32 @@
         }
       }
 
-      generateBiomeSeeds();
+      // Biomes removed: use a clean terrain style with grassland + mountain clusters only.
       for (const tile of game.map.values()) {
-        tile.terrain = createTerrainNode(tile.q, tile.r).terrain;
+        tile.terrain = 'grassland';
+        tile.elevation = 0;
+        tile.slope = false;
       }
-      smoothBiomes();
+
+      const mountainSeeds = [];
+      const mountainSeedCount = 7;
+      for (let i = 0; i < mountainSeedCount; i++) {
+        const seed = randomMapTile(t => distance(t, { q: 0, r: 0 }) > 2);
+        if (seed) mountainSeeds.push({ q: seed.q, r: seed.r, radius: randInt(1, 2) });
+      }
+
+      for (const tile of game.map.values()) {
+        for (const seed of mountainSeeds) {
+          if (distance(tile, seed) <= seed.radius) {
+            tile.terrain = 'mountain';
+            tile.elevation = 1;
+            break;
+          }
+        }
+      }
+
+      applyMountainElevationAndSlopes();
+
       for (const tile of game.map.values()) assignResourceByTerrain(tile);
 
       // Guarantee several ruins and hostile start points.
@@ -1038,25 +1083,19 @@
         const mainDist = distance(tile, mainland);
 
         if (islandDist <= CAMPAIGN_TUNING.firstIslandRadius) {
-          if (tile.q === peak.q && tile.r === peak.r) {
-            tile.terrain = 'mountain';
-          } else if (islandDist <= 1) {
-            tile.terrain = Math.random() < 0.55 ? 'hills' : 'forest';
-          } else {
-            tile.terrain = Math.random() < 0.65 ? 'grassland' : 'hills';
-          }
+          if (tile.q === peak.q && tile.r === peak.r) tile.terrain = 'mountain';
+          else tile.terrain = islandDist <= 1 && Math.random() < 0.45 ? 'mountain' : 'grassland';
           assignResourceByTerrain(tile);
         }
 
         if (mainDist <= CAMPAIGN_TUNING.mainlandRadius) {
-          if (mainDist <= 2) tile.terrain = Math.random() < 0.5 ? 'mountain' : 'hills';
-          else if (mainDist <= 5) tile.terrain = Math.random() < 0.45 ? 'forest' : 'grassland';
-          else tile.terrain = Math.random() < 0.35 ? 'wetlands' : 'grassland';
+          if (mainDist <= 2) tile.terrain = Math.random() < 0.55 ? 'mountain' : 'grassland';
+          else tile.terrain = 'grassland';
           assignResourceByTerrain(tile);
         }
 
         if (tile.q >= 2 && tile.q <= 4 && Math.abs(tile.r + 1) <= 1) {
-          tile.terrain = Math.random() < 0.6 ? 'grassland' : 'hills';
+          tile.terrain = 'grassland';
           assignResourceByTerrain(tile);
         }
       }
@@ -1101,6 +1140,8 @@
           raidProgress: 0
         });
       }
+
+      applyMountainElevationAndSlopes();
 
       game.campaign.totalCities = game.structures.filter(s => s.type === 'ethus_city').length;
       game.campaign.capturedCities = 0;
@@ -2603,6 +2644,12 @@
           stroke = (tile.elevation || 0) > 0 ? '#7c8db7' : (isVisibleNow ? '#3f577f' : '#556983');
         }
 
+        if ((tile.elevation || 0) > 0) {
+          ctx.fillStyle = 'rgba(12, 16, 26, 0.25)';
+          drawHexPath(x, y + 5, HEX_SIZE - 1);
+          ctx.fill();
+        }
+
         drawHex(x, y, HEX_SIZE, fill, stroke, isSelected ? 2 : 1.3);
 
         if (!tile.explored && !isVisibleNow) {
@@ -2633,7 +2680,7 @@
           if (tile.slope && (hasPlayer || isVisibleNow)) {
             ctx.fillStyle = '#f3dca8';
             ctx.font = 'bold 12px sans-serif';
-            ctx.fillText('⇧', x, y - 10);
+            ctx.fillText('↗', x, y - 10);
           }
         }
 
