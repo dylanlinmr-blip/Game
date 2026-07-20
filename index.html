@@ -2619,6 +2619,29 @@
       }
     }
 
+    function slopeArrowGlyph(tile) {
+      if (!tile || !tile.slope) return '↑';
+
+      const lowlandNeighbor = neighbors(tile.q, tile.r)
+        .map(n => game.map.get(key(n.q, n.r)))
+        .find(nt => nt && (nt.elevation || 0) < (tile.elevation || 0));
+
+      if (!lowlandNeighbor) return '↑';
+
+      const dq = tile.q - lowlandNeighbor.q;
+      const dr = tile.r - lowlandNeighbor.r;
+      const dirMap = {
+        '1,0': '→',
+        '1,-1': '↗',
+        '0,-1': '↖',
+        '-1,0': '←',
+        '-1,1': '↙',
+        '0,1': '↘'
+      };
+
+      return dirMap[`${dq},${dr}`] || '↑';
+    }
+
     function drawMap() {
       for (const tile of game.map.values()) {
         const { x, y } = axialToPixel(tile.q, tile.r);
@@ -2675,7 +2698,7 @@
           if (tile.slope && (hasPlayer || isVisibleNow)) {
             ctx.fillStyle = '#f3dca8';
             ctx.font = 'bold 12px sans-serif';
-            ctx.fillText('↑', x, y - 10);
+            ctx.fillText(slopeArrowGlyph(tile), x, y - 10);
           }
         }
 
