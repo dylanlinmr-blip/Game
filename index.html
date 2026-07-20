@@ -1746,6 +1746,12 @@
         tech_tree_core: 'research lab'
       };
 
+      const removedLegacyProductionStructures = new Set(['farm', 'quarry', 'lumber_mill', 'port']);
+      if (removedLegacyProductionStructures.has(type)) {
+        log('Legacy production structures were removed from this version.', 'warn');
+        return;
+      }
+
       const cost = costs[type];
       if (!cost) return;
       if (!canAfford(cost)) {
@@ -2047,7 +2053,6 @@
     function structureProductionPhase() {
       const crystalMines = structureCount('deep_crystal_mine', 'player');
       const researchLabs = structureCount('tech_tree_core', 'player');
-      const capitals = structureCount('capital', 'player');
 
       let mineHits = 0;
       let mineCrystal = 0;
@@ -2059,12 +2064,11 @@
       }
 
       const labCrystal = researchLabs * randInt(24, 36);
-      const capitalCrystal = capitals * 8;
 
-      game.resources.crystal += mineCrystal + labCrystal + capitalCrystal;
+      game.resources.crystal += mineCrystal + labCrystal;
 
-      if (crystalMines || researchLabs || capitals) {
-        log(`Extraction report: Crystal Mine precious-metal hits ${mineHits}/${crystalMines} (${crystalMines ? '3% chance each' : 'n/a'}) for +${mineCrystal} crystal; Research Lab guaranteed yields +${labCrystal} crystal; Capital reserves +${capitalCrystal} crystal.`, 'good');
+      if (crystalMines || researchLabs) {
+        log(`Extraction report: Crystal Mine precious-metal hits ${mineHits}/${crystalMines} (${crystalMines ? '3% chance each' : 'n/a'}) for +${mineCrystal} crystal; Research Lab guaranteed yields +${labCrystal} crystal.`, 'good');
       }
     }
 
@@ -2981,12 +2985,8 @@
       const researchLab = getStructureAt(hex.q, hex.r, 'tech_tree_core');
       const unlockedBuildButtons = [
         '<button data-action="build-village">Village</button>',
-        '<button data-action="build-farm">Farm</button>',
         '<button data-action="build-wall">Wall</button>',
         '<button data-action="build-archer_tower">Archer Tower</button>',
-        '<button data-action="build-port">Port</button>',
-        '<button data-action="build-lumber_mill">Lumber Mill</button>',
-        '<button data-action="build-quarry">Quarry</button>',
         '<button data-action="build-barracks">Barracks</button>'
       ];
       if (campaignProgress.unlockCrystalMine) unlockedBuildButtons.push('<button data-action="build-deep_crystal_mine">Crystal Mine</button>');
