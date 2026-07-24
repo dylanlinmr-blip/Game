@@ -516,7 +516,7 @@
                 <div class="campaign-level-grid">
                   <button id="campaignLevelOneBtn" class="campaign-level" data-menu-mode="campaign_level_1" data-menu-level="1">
                     <div class="campaign-level-name">Level 1: Beast Hunt</div>
-                    <div class="campaign-level-desc">Start with 5 Soldiers + 3 Archers. Defeat 3 hostile beasts, then explore until you find the enemy building.</div>
+                    <div class="campaign-level-desc">Start with 5 Soldiers + 3 Archers. Defeat the beast horde guarding the central mountain lab, then stand on the lab to win.</div>
                   </button>
                   <button id="campaignLevelTwoBtn" class="campaign-level" disabled>
                     <div class="campaign-level-name">Level 2: Locked</div>
@@ -625,8 +625,12 @@
     const resourceTypes = ['crystal'];
     // Campgain tuning knobs: keep here for easy balancing tweaks.
     const CAMPAIGN_LEVEL_ONE_TUNING = {
-      start: { q: 0, r: 0 },
-      beastsRequired: 3
+      start: { q: -7, r: 4 },
+      mountainCenter: { q: 0, r: 0 },
+      beastsRequired: 3,
+      beastGuardRadius: 2,
+      beastEngageRadius: 4,
+      beastLeashRadius: 3
     };
 
     const CAMPAIGN_TUNING = {
@@ -1151,39 +1155,47 @@
       return start;
     }
 
-    function setupCampaignLevelOneElevation(lairPos, startPos) {
-      if (!lairPos) return null;
-      const plateauRadius = 2;
-      for (const tile of game.map.values()) {
-        tile.elevation = 0;
-        tile.slope = false;
-      }
+    function setupCampaignLevelOneElevation(startPos) {
+      const mountainCenter = CAMPAIGN_LEVEL_ONE_TUNING.mountainCenter;
+      const centerTile = game.map.get(key(mountainCenter.q, mountainCenter.r));
+      if (!centerTile) return null;
 
       for (const tile of game.map.values()) {
-        if (distance(tile, lairPos) <= plateauRadius) {
-          tile.elevation = 1;
-          if (tile.terrain === 'ocean') {
-            tile.terrain = 'hills';
-            assignResourceByTerrain(tile);
-          }
+        tile.terrain = 'grassland';
+        tile.explored = true;
+        tile.visible = true;
+        tile.elevation = 0;
+        tile.slope = false;
+        tile.ruin = false;
+        tile.ruinVisited = false;
+        assignResourceByTerrain(tile);
+      }
+
+      centerTile.terrain = 'mountain';
+      centerTile.elevation = 1;
+      centerTile.slope = true;
+      centerTile.resource = 'crystal';
+      centerTile.resourceAmount = Math.max(centerTile.resourceAmount || 0, 120);
+
+      for (const n of neighbors(mountainCenter.q, mountainCenter.r)) {
+        const ringTile = game.map.get(key(n.q, n.r));
+        if (!ringTile) continue;
+        if (distance(n, startPos) > 3 && Math.random() < 0.4) {
+          ringTile.terrain = 'forest';
+          assignResourceByTerrain(ringTile);
         }
       }
 
-      const slopeCandidates = Array.from(game.map.values())
-        .filter(tile => (tile.elevation || 0) === 1)
-        .filter(tile => neighbors(tile.q, tile.r).some(n => {
-          const neighborTile = game.map.get(key(n.q, n.r));
-          return (neighborTile?.elevation || 0) === 0;
-        }));
+      game.structures = game.structures.filter(s => s.type !== 'tech_tree_core');
+      game.structures.push({
+        type: 'tech_tree_core',
+        owner: 'hostile',
+        q: mountainCenter.q,
+        r: mountainCenter.r,
+        hp: 26
+      });
 
-      if (!slopeCandidates.length) return null;
-
-      slopeCandidates.sort((a, b) => distance(a, startPos) - distance(b, startPos));
-      const slopeTile = slopeCandidates[0];
-      slopeTile.slope = true;
-      slopeTile.terrain = 'hills';
-      assignResourceByTerrain(slopeTile);
-      return { q: slopeTile.q, r: slopeTile.r };
+      return { q: mountainCenter.q, r: mountainCenter.r };
     }
 
     function setupGame(selectedMode = game.mode || 'classic') {
@@ -1237,6 +1249,7 @@
 
       let startQ = 0;
       let startR = 0;
+      let levelOneLab = null;
       if (game.mode === 'campgain') {
         const landing = configureCampgainEthusMap();
         startQ = landing.q;
@@ -1264,6 +1277,10 @@
         const shoreStart = randomMapTile(tile => isShoreTile(tile));
         startQ = shoreStart ? shoreStart.q : 0;
         startR = shoreStart ? shoreStart.r : 0;
+      }
+
+      if (game.mode === 'campaign_level_1') {
+        levelOneLab = setupCampaignLevelOneElevation({ q: startQ, r: startR });
       }
 
       const startTile = game.map.get(key(startQ, startR));
@@ -1322,7 +1339,12 @@
           : game.mode === 'campgain'
             ? (tile) => !getUnitAt(tile.q, tile.r) && tile.terrain !== 'ocean' && tile.q > 0 && distance(tile, { q: startQ, r: startR }) > 3
             : game.mode === 'campaign_level_1'
-              ? (tile) => !getUnitAt(tile.q, tile.r) && tile.terrain !== 'ocean' && distance(tile, { q: startQ, r: startR }) >= 3 && distance(tile, { q: startQ, r: startR }) <= 6
+              ? (tile) => {
+                  if (getUnitAt(tile.q, tile.r) || tile.terrain === 'ocean') return false;
+                  const lab = levelOneLab || CAMPAIGN_LEVEL_ONE_TUNING.mountainCenter;
+                  const ringDist = distance(tile, lab);
+                  return ringDist >= 1 && ringDist <= CAMPAIGN_LEVEL_ONE_TUNING.beastGuardRadius && distance(tile, { q: startQ, r: startR }) > 3;
+                }
               : (tile) => isShoreTile(tile) && !getUnitAt(tile.q, tile.r) && distance(tile, { q: startQ, r: startR }) > 3;
         const t = randomMapTile(spawnFilter);
         if (!t) continue;
@@ -1338,10 +1360,11 @@
           tile.visible = true;
         }
 
-        game.campaignMission.targetBuilding = null;
+        game.campaignMission.targetBuilding = levelOneLab || CAMPAIGN_LEVEL_ONE_TUNING.mountainCenter;
         game.campaignMission.slopeHex = null;
         game.campaignMission.beastsRequired = CAMPAIGN_LEVEL_ONE_TUNING.beastsRequired;
         game.campaignMission.beastsDefeated = 0;
+        game.campaignMission.huntCompleteAnnounced = false;
         game.campaignMission.phase = 'hunt';
       }
 
@@ -1349,9 +1372,10 @@
       recalculateVisibility();
       log(`Mode: ${modeLabel(game.mode)}.`, 'good');
       if (game.mode === 'campaign_level_1') {
+        const lab = game.campaignMission.targetBuilding || CAMPAIGN_LEVEL_ONE_TUNING.mountainCenter;
         log('Campaign Level 1 briefing: Beast Hunt.', 'warn');
-        log('Mission: defeat 3 hostile beasts. The map is fully explored.', 'good');
-        log('Stealth rule: beasts hiding in forest bushes are invisible until they leave the bush.', 'warn');
+        log(`Mission: defeat 3 hostile beasts guarding the central mountain, then stand on the Research Lab at ${lab.q},${lab.r}.`, 'good');
+        log('Beasts now move as a horde and mostly hold their mountain perimeter until you approach.', 'warn');
       } else {
         log('Your expedition lands on the shore and founds a Capital City with a bustling port.', 'good');
       }
@@ -2185,6 +2209,101 @@
       buildWeatherVisuals();
     }
 
+    function campaignLevelOneHordePhase() {
+      const beasts = hostileUnits().filter(u => u.type === 'beast');
+      if (!beasts.length) return;
+
+      const players = playerUnits();
+      const lab = game.campaignMission.targetBuilding || CAMPAIGN_LEVEL_ONE_TUNING.mountainCenter;
+      const guardRadius = CAMPAIGN_LEVEL_ONE_TUNING.beastGuardRadius;
+      const engageRadius = CAMPAIGN_LEVEL_ONE_TUNING.beastEngageRadius;
+      const leashRadius = CAMPAIGN_LEVEL_ONE_TUNING.beastLeashRadius;
+
+      let focusTarget = null;
+      let nearestToLab = Infinity;
+      for (const p of players) {
+        const d = distance(p, lab);
+        if (d < nearestToLab) {
+          nearestToLab = d;
+          focusTarget = p;
+        }
+      }
+
+      const shouldEngage = !!focusTarget && nearestToLab <= engageRadius;
+      const beastCenter = beasts.reduce((acc, b) => ({ q: acc.q + b.q, r: acc.r + b.r }), { q: 0, r: 0 });
+      beastCenter.q /= beasts.length;
+      beastCenter.r /= beasts.length;
+
+      for (const h of beasts) {
+        h.moves = h.maxMoves;
+
+        const victim = getUnitAt(h.q, h.r, 'player');
+        if (victim) {
+          victim.hp -= h.atk;
+          h.hp -= Math.max(1, victim.atk - 1);
+          log(`Beast horde mauls your ${victim.type} on the mountain approach!`, 'bad');
+          continue;
+        }
+
+        if (!focusTarget) continue;
+
+        const currentToLab = distance(h, lab);
+        if (!shouldEngage) {
+          if (currentToLab <= 1 && Math.random() < 0.85) continue;
+          if (Math.random() < 0.55) continue;
+        }
+
+        const focus = shouldEngage ? focusTarget : lab;
+        const currentScore = distance(h, focus) * (shouldEngage ? 3 : 1.5)
+          + currentToLab * (shouldEngage ? 0.8 : 2.4)
+          + distance(h, beastCenter) * 1.3;
+
+        let bestStep = null;
+        let bestScore = currentScore;
+
+        for (const n of neighbors(h.q, h.r)) {
+          if (getUnitAt(n.q, n.r, 'hostile')) continue;
+
+          const fromTile = game.map.get(key(h.q, h.r));
+          const toTile = game.map.get(key(n.q, n.r));
+          if (!canTraverseElevation(fromTile, toTile)) continue;
+
+          const dLab = distance(n, lab);
+          if (dLab > leashRadius) continue;
+
+          const score = distance(n, focus) * (shouldEngage ? 3 : 1.5)
+            + dLab * (shouldEngage ? 0.8 : 2.4)
+            + distance(n, beastCenter) * 1.3;
+
+          if (score < bestScore) {
+            bestScore = score;
+            bestStep = n;
+          }
+        }
+
+        const moveThreshold = shouldEngage ? 0.15 : 0.75;
+        if (bestStep && (currentScore - bestScore) > moveThreshold) {
+          h.q = bestStep.q;
+          h.r = bestStep.r;
+        }
+
+        if (!shouldEngage && distance(h, lab) > guardRadius) {
+          const pullBack = neighbors(h.q, h.r)
+            .filter(n => !getUnitAt(n.q, n.r, 'hostile'))
+            .filter(n => {
+              const fromTile = game.map.get(key(h.q, h.r));
+              const toTile = game.map.get(key(n.q, n.r));
+              return canTraverseElevation(fromTile, toTile);
+            })
+            .sort((a, b) => distance(a, lab) - distance(b, lab))[0];
+          if (pullBack && distance(pullBack, lab) < distance(h, lab)) {
+            h.q = pullBack.q;
+            h.r = pullBack.r;
+          }
+        }
+      }
+    }
+
     function hostilePhase() {
       if (game.mode === 'peaceful') {
         return;
@@ -2192,6 +2311,13 @@
 
       if (game.mode === 'classic' && game.turn <= 3) {
         log('Hostiles remain peaceful this turn.', 'good');
+        return;
+      }
+
+      if (game.mode === 'campaign_level_1') {
+        campaignLevelOneHordePhase();
+        cleanupDeadUnits();
+        game.structures = game.structures.filter(s => s.hp > 0);
         return;
       }
 
@@ -2370,14 +2496,23 @@
       const remainingBeasts = hostileUnits().filter(u => u.type === 'beast').length;
       mission.beastsDefeated = Math.max(0, mission.beastsRequired - remainingBeasts);
 
-      if (mission.beastsDefeated >= mission.beastsRequired && !mission.victoryAwarded) {
+      const lab = mission.targetBuilding || CAMPAIGN_LEVEL_ONE_TUNING.mountainCenter;
+      const standingOnLab = !!lab && playerUnits().some(u => u.q === lab.q && u.r === lab.r);
+
+      if (mission.beastsDefeated >= mission.beastsRequired && !mission.huntCompleteAnnounced) {
+        mission.huntCompleteAnnounced = true;
+        mission.phase = 'claim_lab';
+        log(`All beasts are defeated. Occupy the Research Lab at ${lab.q},${lab.r} to secure victory.`, 'good');
+      }
+
+      if (mission.beastsDefeated >= mission.beastsRequired && standingOnLab && !mission.victoryAwarded) {
         mission.victoryAwarded = true;
         campaignProgress.level1Completed = true;
         campaignProgress.unlockCrystalMine = true;
         campaignProgress.unlockTechTree = true;
         game.gameOver = true;
-        statusEl.innerHTML = '<span class="good">Victory! All 3 beasts defeated. Campaign Level 1 complete.</span>';
-        log('Objective complete: all 3 hostile beasts defeated.', 'good');
+        statusEl.innerHTML = '<span class="good">Victory! Beast horde cleared and Research Lab secured. Campaign Level 1 complete.</span>';
+        log('Objective complete: the beast horde is gone and your forces hold the mountain Research Lab.', 'good');
         log('Unlock earned: Crystal Mine + Research Lab.', 'good');
         return true;
       }
@@ -2955,7 +3090,7 @@
         : '';
 
       const campaignLevelNote = game.mode === 'campaign_level_1'
-        ? `<div class="small" style="margin-bottom:6px; color:#f3d59e;">Mission: Defeat beasts (${game.campaignMission.beastsDefeated}/${game.campaignMission.beastsRequired}). Bush-hidden beasts are invisible.</div>`
+        ? `<div class="small" style="margin-bottom:6px; color:#f3d59e;">Mission: Defeat beasts (${game.campaignMission.beastsDefeated}/${game.campaignMission.beastsRequired}), then stand on the mountain Research Lab at ${game.campaignMission.targetBuilding?.q ?? 0},${game.campaignMission.targetBuilding?.r ?? 0} to win.</div>`
         : '';
 
       const recruitButtons = settlement
@@ -3021,6 +3156,8 @@
     }
 
     function showActionPopup(clientX, clientY, html) {
+      inspectedUnitId = null;
+      hideUnitStatsPanel();
       actionPopupEl.innerHTML = html;
       const wrapRect = canvasWrapEl.getBoundingClientRect();
 
@@ -3046,6 +3183,7 @@
     }
 
     function showUnitStatsPanel(unit, clientX, clientY) {
+      hideActionPopup();
       if (!unit) {
         unitStatsPanelEl.classList.remove('show');
         return;
@@ -3183,7 +3321,7 @@
         ? ` | Ethus Cities: ${game.campaign.capturedCities}/${game.campaign.totalCities} | Doctrine: ${capitalize(game.campaignStyle)}`
         : '';
       const campaignLevelStatus = game.mode === 'campaign_level_1'
-        ? ` | Objective: Defeat beasts (${game.campaignMission.beastsDefeated}/${game.campaignMission.beastsRequired})`
+        ? ` | Objective: Defeat beasts (${game.campaignMission.beastsDefeated}/${game.campaignMission.beastsRequired}) + stand on Research Lab`
         : '';
       statusEl.innerHTML = `Mode: <strong>${modeLabel(game.mode)}</strong><br/>Weather: <strong>${game.weather}</strong><br/>Explored: ${progress.explored}/${progress.total} (${progress.pct}%) | Hostiles: ${hostiles} | Capital Cities: ${capitals} | Villages: ${villages} | Cities: ${cities} | Pop: ${population}/${popCap} | Tech: ${game.tech}${kingStatus}${campgainStatus}${campaignLevelStatus}`;
 
@@ -3299,27 +3437,39 @@
       }
       game.selectedHex = hex;
 
+      const selected = game.units.find(u => u.id === game.selectedUnitId && u.owner === 'player');
       const clickedUnit = getUnitAt(hex.q, hex.r);
-      if (clickedUnit && !isUnitHiddenFromPlayer(clickedUnit)) {
-        inspectedUnitId = clickedUnit.id;
-        game.selectedUnitId = clickedUnit.owner === 'player' ? clickedUnit.id : null;
+      const visibleClickedUnit = clickedUnit && !isUnitHiddenFromPlayer(clickedUnit) ? clickedUnit : null;
+      const isCommandOnAdjacentHex = selected && (selected.q !== hex.q || selected.r !== hex.r) && distance(selected, hex) === 1;
+
+      if (isCommandOnAdjacentHex) {
+        attemptMove(selected, hex.q, hex.r);
+        checkGameState();
         updateUI();
         render();
-        showUnitStatsPanel(clickedUnit, event.clientX, event.clientY);
-        const context = getContextActionMarkup(hex);
-        if (context.hasActions) showActionPopup(event.clientX, event.clientY, context.html);
-        else hideActionPopup();
+
+        const selectedAfter = game.units.find(u => u.id === selected.id && u.owner === 'player');
+        if (selectedAfter) {
+          inspectedUnitId = selectedAfter.id;
+          showUnitStatsPanel(selectedAfter, event.clientX, event.clientY);
+        } else {
+          inspectedUnitId = null;
+          hideUnitStatsPanel();
+        }
+        return;
+      }
+
+      if (visibleClickedUnit) {
+        inspectedUnitId = visibleClickedUnit.id;
+        game.selectedUnitId = visibleClickedUnit.owner === 'player' ? visibleClickedUnit.id : null;
+        updateUI();
+        render();
+        showUnitStatsPanel(visibleClickedUnit, event.clientX, event.clientY);
         return;
       }
 
       hideUnitStatsPanel();
       inspectedUnitId = null;
-
-      const selected = game.units.find(u => u.id === game.selectedUnitId && u.owner === 'player');
-      if (selected) {
-        attemptMove(selected, hex.q, hex.r);
-      }
-
       checkGameState();
       updateUI();
       render();
