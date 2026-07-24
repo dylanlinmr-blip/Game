@@ -97,17 +97,101 @@
     button:disabled { opacity: 0.5; cursor: not-allowed; }
 
     #endTurnBtn {
-      width: 100%;
-      margin-top: 10px;
       background: #235a3e;
       border-color: #3c8861;
       font-size: 0.95rem;
-      padding: 10px;
+      padding: 10px 14px;
+      min-width: 120px;
     }
 
     #canvasWrap {
       position: relative;
       min-height: 80vh;
+      padding-bottom: 116px;
+    }
+
+    .bottom-hud {
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      bottom: 12px;
+      z-index: 11;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+      background: rgba(10, 16, 26, 0.9);
+      border: 1px solid #39527c;
+      border-radius: 10px;
+      padding: 10px 12px;
+      box-shadow: 0 12px 26px rgba(0, 0, 0, 0.35);
+      backdrop-filter: blur(2px);
+    }
+
+    .bottom-hud-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .bottom-hud-meta {
+      grid-column: 1 / -1;
+      font-size: 0.8rem;
+      color: #9fb3d8;
+      border-top: 1px solid rgba(80, 112, 160, 0.38);
+      padding-top: 6px;
+    }
+
+    .context-actions {
+      margin-top: 8px;
+      background: #0f1623;
+      border: 1px solid #2a3953;
+      border-radius: 8px;
+      padding: 8px;
+      min-height: 46px;
+    }
+
+    .context-actions .small {
+      color: #b4c4e2;
+    }
+
+    .victory-screen {
+      position: absolute;
+      inset: 12px;
+      z-index: 13;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at top, rgba(24, 38, 63, 0.95), rgba(9, 13, 21, 0.97));
+      border: 1px solid #3d5d96;
+      border-radius: 12px;
+    }
+
+    .victory-screen.hidden {
+      display: none;
+    }
+
+    .victory-card {
+      width: min(560px, 92%);
+      background: rgba(10, 18, 30, 0.95);
+      border: 1px solid #6b8ecb;
+      border-radius: 12px;
+      padding: 18px;
+      box-shadow: 0 16px 34px rgba(0, 0, 0, 0.45);
+    }
+
+    .victory-title {
+      font-size: 1.26rem;
+      color: #d9e8ff;
+      margin-bottom: 8px;
+      letter-spacing: 0.4px;
+    }
+
+    .victory-sub {
+      color: #a8bce2;
+      margin-bottom: 12px;
+      font-size: 0.95rem;
+      line-height: 1.4;
     }
 
     .action-popup {
@@ -378,6 +462,15 @@
       canvas {
         height: 62vh;
       }
+      .bottom-hud {
+        grid-template-columns: 1fr;
+      }
+      .bottom-hud-controls {
+        justify-content: stretch;
+      }
+      .bottom-hud-controls button {
+        flex: 1;
+      }
     }
   </style>
 </head>
@@ -390,11 +483,6 @@
       <div class="section">
         <strong>Turn <span id="turnEl">1</span></strong>
         <div class="small" id="statusEl"></div>
-      </div>
-
-      <div class="section">
-        <strong>Resources</strong>
-        <div class="resource-grid" id="resourceGrid"></div>
       </div>
 
       <div class="section">
@@ -412,16 +500,13 @@
           <option value="raid">Ethus approach: Raid (faster strikes, better loot)</option>
         </select>
         <button id="newGameBtn" style="width:100%; margin-bottom:8px;">Start New Game</button>
-        <strong>Actions</strong>
-        <button id="tradeBtn">Trade with Ally</button>
-        <button id="endTurnBtn">End Turn</button>
       </div>
 
       <div class="section">
         <strong>Selected Tile / Unit</strong>
         <div id="selectionEl" class="small">None</div>
         <div id="unitOptionsEl" class="small" style="margin-top:8px; color:#b7c8e7;">Click a unit to view its options.</div>
-        <div id="contextActionsEl" class="small" style="margin-top:8px; color:#d5e3fb;">Click a capital, village, or city for recruit options, or an explored hex for build options.</div>
+        <div id="contextActionsEl" class="context-actions"><div class="small">Click a capital, village, or city for recruit options, or an explored hex for build options.</div></div>
       </div>
 
       <div class="section">
@@ -434,7 +519,7 @@
         <ul>
           <li>Drag the map to pan. Click your unit, then click adjacent hexes to move.</li>
           <li>Hexes are black until explored, and dim when empty.</li>
-          <li>Click a capital, village, or city for recruit options; click an explored hex for build options.</li>
+          <li>Click a capital, village, or city for recruit options; click an explored hex for build options, then choose actions from the side panel.</li>
           <li>Explore ruins for loot + technology.</li>
           <li>Modes: Peaceful (no hostiles), Classic, King's Last Stand, and Campgain.</li>
           <li>In King's Last Stand, your king must survive.</li>
@@ -533,7 +618,25 @@
       </div>
       <div id="actionPopup" class="action-popup"></div>
       <div id="unitStatsPanel" class="unit-stats-panel"></div>
+      <div id="campaignVictoryScreen" class="victory-screen hidden">
+        <div class="victory-card">
+          <div class="victory-title">Campaign Level Complete</div>
+          <div id="campaignVictoryText" class="victory-sub">You secured the mountain research lab.</div>
+          <div class="btn-row" style="margin-top:10px;">
+            <button id="victoryReplayBtn">Replay Level 1</button>
+            <button id="victoryMenuBtn" style="background:#2b3856;">Back to Menu</button>
+          </div>
+        </div>
+      </div>
       <canvas id="gameCanvas" width="1400" height="950"></canvas>
+      <div id="bottomHud" class="bottom-hud">
+        <div class="resource-grid" id="resourceGrid"></div>
+        <div class="bottom-hud-controls">
+          <button id="tradeBtn">Trade with Ally</button>
+          <button id="endTurnBtn">End Turn</button>
+        </div>
+        <div id="cameraHudInfo" class="bottom-hud-meta">Camera ready.</div>
+      </div>
     </main>
   </div>
 
@@ -549,6 +652,11 @@
     const contextActionsEl = document.getElementById('contextActionsEl');
     const actionPopupEl = document.getElementById('actionPopup');
     const unitStatsPanelEl = document.getElementById('unitStatsPanel');
+    const campaignVictoryScreenEl = document.getElementById('campaignVictoryScreen');
+    const campaignVictoryTextEl = document.getElementById('campaignVictoryText');
+    const victoryReplayBtn = document.getElementById('victoryReplayBtn');
+    const victoryMenuBtn = document.getElementById('victoryMenuBtn');
+    const cameraHudInfoEl = document.getElementById('cameraHudInfo');
     const startMenuEl = document.getElementById('startMenu');
     const startStepIntroEl = document.getElementById('startStepIntro');
     const startStepCategoryEl = document.getElementById('startStepCategory');
@@ -810,6 +918,28 @@
       div.textContent = message;
       logEl.prepend(div);
       while (logEl.children.length > 70) logEl.removeChild(logEl.lastChild);
+    }
+
+    function showCampaignVictoryScreen() {
+      if (game.mode !== 'campaign_level_1') return;
+      const mission = game.campaignMission;
+      const lab = mission.targetBuilding || CAMPAIGN_LEVEL_ONE_TUNING.mountainCenter;
+      campaignVictoryTextEl.textContent = `Beast horde eliminated (${mission.beastsDefeated}/${mission.beastsRequired}). Your troops secured the Research Lab at ${lab.q},${lab.r} on turn ${game.turn}.`;
+      campaignVictoryScreenEl.classList.remove('hidden');
+    }
+
+    function hideCampaignVictoryScreen() {
+      campaignVictoryScreenEl.classList.add('hidden');
+    }
+
+    function updateBottomHudMeta() {
+      const center = pixelToAxial(canvas.width / 2, canvas.height / 2);
+      const tile = game.map.get(key(center.q, center.r));
+      const tileLabel = tile
+        ? `${tile.terrain}${(tile.elevation || 0) > 0 ? ' • elevated' : ''}${tile.slope ? ' • slope' : ''}`
+        : 'outside map';
+      const text = `Camera ${Math.round(camera.x)}, ${Math.round(camera.y)} • Center hex ${center.q},${center.r} (${tileLabel})`;
+      if (cameraHudInfoEl.textContent !== text) cameraHudInfoEl.textContent = text;
     }
 
     function axialToPixel(q, r) {
@@ -1242,6 +1372,7 @@
       inspectedUnitId = null;
       hideActionPopup();
       hideUnitStatsPanel();
+      hideCampaignVictoryScreen();
       logEl.innerHTML = '';
       modeSelect.value = selectedMode;
 
@@ -2514,6 +2645,7 @@
         statusEl.innerHTML = '<span class="good">Victory! Beast horde cleared and Research Lab secured. Campaign Level 1 complete.</span>';
         log('Objective complete: the beast horde is gone and your forces hold the mountain Research Lab.', 'good');
         log('Unlock earned: Crystal Mine + Research Lab.', 'good');
+        showCampaignVictoryScreen();
         return true;
       }
       return false;
@@ -3042,12 +3174,7 @@
       ctx.fillStyle = vignette;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      ctx.fillStyle = 'rgba(10, 15, 24, 0.78)';
-      ctx.fillRect(10, 10, 300, 34);
-      ctx.fillStyle = '#d7e6ff';
-      ctx.font = '12px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText('Drag to pan map • Viewport offset: ' + Math.round(camera.x) + ', ' + Math.round(camera.y), 18, 31);
+      updateBottomHudMeta();
     }
 
     function getContextActionMarkup(hex) {
@@ -3156,30 +3283,14 @@
     }
 
     function showActionPopup(clientX, clientY, html) {
-      inspectedUnitId = null;
-      hideUnitStatsPanel();
-      actionPopupEl.innerHTML = html;
-      const wrapRect = canvasWrapEl.getBoundingClientRect();
-
-      let left = clientX - wrapRect.left + 12;
-      let top = clientY - wrapRect.top + 12;
-
-      actionPopupEl.style.left = left + 'px';
-      actionPopupEl.style.top = top + 'px';
-      actionPopupEl.classList.add('show');
-
-      const popupRect = actionPopupEl.getBoundingClientRect();
-      const overflowRight = popupRect.right - wrapRect.right;
-      const overflowBottom = popupRect.bottom - wrapRect.bottom;
-      if (overflowRight > 0) left -= overflowRight + 10;
-      if (overflowBottom > 0) top -= overflowBottom + 10;
-
-      actionPopupEl.style.left = Math.max(8, left) + 'px';
-      actionPopupEl.style.top = Math.max(8, top) + 'px';
+      actionPopupEl.classList.remove('show');
+      actionPopupEl.innerHTML = '';
+      contextActionsEl.innerHTML = html;
     }
 
     function hideActionPopup() {
       actionPopupEl.classList.remove('show');
+      actionPopupEl.innerHTML = '';
     }
 
     function showUnitStatsPanel(unit, clientX, clientY) {
@@ -3263,8 +3374,8 @@
     function updateContextActions() {
       const context = getContextActionMarkup(game.selectedHex);
       contextActionsEl.innerHTML = context.hasActions
-        ? 'Options are shown in the popup for the selected unit/hex.'
-        : 'Click a capital, village, or city for recruit options, or an explored hex for build options.';
+        ? context.html
+        : '<div class="small">Click a capital, village, or city for recruit options, or an explored hex for build options.</div>';
     }
 
     function updateSelectionInfo() {
@@ -3385,6 +3496,7 @@
 
     function openStartMenu() {
       startMenuEl.classList.remove('hidden');
+      campaignVictoryScreenEl.classList.add('hidden');
       selectedMenuCategory = null;
       selectedMenuMode = null;
       menuGamesBtn.classList.remove('active');
@@ -3410,6 +3522,7 @@
       updateModeControls();
       setupGame(selectedMenuMode);
       startMenuEl.classList.add('hidden');
+      campaignVictoryScreenEl.classList.add('hidden');
     }
 
     function getCanvasPoint(event) {
@@ -3566,18 +3679,10 @@
       handleContextAction(action);
       updateUI();
       render();
-      const context = getContextActionMarkup(game.selectedHex);
-      if (context.hasActions) {
-        const rect = canvasWrapEl.getBoundingClientRect();
-        const anchor = game.selectedHex ? axialToPixel(game.selectedHex.q, game.selectedHex.r) : { x: 36, y: 36 };
-        showActionPopup(rect.left + anchor.x, rect.top + anchor.y, context.html);
-      } else {
-        hideActionPopup();
-      }
+      updateContextActions();
     };
 
     contextActionsEl.addEventListener('click', contextActionClickHandler);
-    actionPopupEl.addEventListener('click', contextActionClickHandler);
 
     document.addEventListener('click', (event) => {
       const insidePopup = actionPopupEl.contains(event.target);
@@ -3592,6 +3697,15 @@
 
     tradeBtn.addEventListener('click', tradeWithAlly);
     endTurnBtn.addEventListener('click', endTurn);
+    victoryReplayBtn.addEventListener('click', () => {
+      hideCampaignVictoryScreen();
+      setupGame('campaign_level_1');
+      startMenuEl.classList.add('hidden');
+    });
+    victoryMenuBtn.addEventListener('click', () => {
+      hideCampaignVictoryScreen();
+      openStartMenu();
+    });
     modeSelect.addEventListener('change', updateModeControls);
     newGameBtn.addEventListener('click', () => setupGame(modeSelect.value));
 
