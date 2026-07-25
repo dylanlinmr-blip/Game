@@ -632,6 +632,7 @@
         <div class="resource-grid" id="resourceGrid"></div>
         <div class="bottom-hud-controls">
           <button id="tradeBtn">Trade with Ally</button>
+          <button id="researchTreeBtn">Research Tree</button>
           <button id="endTurnBtn">End Turn</button>
         </div>
         <div id="cameraHudInfo" class="bottom-hud-meta">Camera ready.</div>
@@ -690,6 +691,7 @@
     const campaignStyleSelect = document.getElementById('campaignStyleSelect');
     const newGameBtn = document.getElementById('newGameBtn');
     const tradeBtn = document.getElementById('tradeBtn');
+    const researchTreeBtn = document.getElementById('researchTreeBtn');
     const endTurnBtn = document.getElementById('endTurnBtn');
 
     const HEX_SIZE = 36;
@@ -3695,6 +3697,7 @@
     });
 
     tradeBtn.addEventListener('click', tradeWithAlly);
+    researchTreeBtn.addEventListener('click', openTechTreeOverview);
     endTurnBtn.addEventListener('click', endTurn);
     victoryReplayBtn.addEventListener('click', () => {
       hideCampaignVictoryScreen();
