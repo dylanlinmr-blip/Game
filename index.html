@@ -1032,7 +1032,13 @@
       const toElevation = toTile.elevation || 0;
       if (fromElevation === toElevation) return true;
       if (Math.abs(toElevation - fromElevation) > 1) return false;
-      if (toElevation > fromElevation) return !!toTile.slope;
+      if (toElevation > fromElevation) {
+        if (!toTile.slope) return false;
+        if (toTile.slopeFrom && Number.isInteger(toTile.slopeFrom.q) && Number.isInteger(toTile.slopeFrom.r)) {
+          return fromTile.q === toTile.slopeFrom.q && fromTile.r === toTile.slopeFrom.r;
+        }
+        return true;
+      }
       return true;
     }
 
@@ -1040,6 +1046,7 @@
       for (const tile of game.map.values()) {
         tile.elevation = tile.terrain === 'mountain' ? 1 : 0;
         tile.slope = false;
+        tile.slopeFrom = null;
       }
 
       const boundaryMountains = Array.from(game.map.values()).filter(tile =>
@@ -1057,6 +1064,20 @@
 
       if (boundaryMountains.length && !boundaryMountains.some(t => t.slope)) {
         boundaryMountains[0].slope = true;
+      }
+
+      for (const tile of boundaryMountains.filter(t => t.slope)) {
+        const lowlandNeighbors = neighbors(tile.q, tile.r)
+          .map(n => game.map.get(key(n.q, n.r)))
+          .filter(nt => nt && (nt.elevation || 0) < (tile.elevation || 0));
+        if (!lowlandNeighbors.length) {
+          tile.slopeFrom = null;
+          continue;
+        }
+
+        const hash = Math.abs(tile.q * 31 + tile.r * 17);
+        const chosen = lowlandNeighbors[hash % lowlandNeighbors.length];
+        tile.slopeFrom = { q: chosen.q, r: chosen.r };
       }
     }
 
@@ -1077,6 +1098,7 @@
             resourceAmount: 0,
             elevation: 0,
             slope: false,
+            slopeFrom: null,
             ruin: Math.random() < 0.09,
             ruinVisited: false
           });
@@ -1088,6 +1110,7 @@
         tile.terrain = 'grassland';
         tile.elevation = 0;
         tile.slope = false;
+        tile.slopeFrom = null;
       }
 
       const mountainSeeds = [];
@@ -1305,8 +1328,17 @@
       centerTile.terrain = 'mountain';
       centerTile.elevation = 1;
       centerTile.slope = true;
+      centerTile.slopeFrom = null;
       centerTile.resource = 'crystal';
       centerTile.resourceAmount = Math.max(centerTile.resourceAmount || 0, 120);
+
+      const centerLowlandNeighbors = neighbors(mountainCenter.q, mountainCenter.r)
+        .map(n => game.map.get(key(n.q, n.r)))
+        .filter(nt => nt && (nt.elevation || 0) < (centerTile.elevation || 0));
+      if (centerLowlandNeighbors.length) {
+        centerLowlandNeighbors.sort((a, b) => distance(a, startPos) - distance(b, startPos));
+        centerTile.slopeFrom = { q: centerLowlandNeighbors[0].q, r: centerLowlandNeighbors[0].r };
+      }
 
       for (const n of neighbors(mountainCenter.q, mountainCenter.r)) {
         const ringTile = game.map.get(key(n.q, n.r));
@@ -2894,9 +2926,16 @@
     function slopeArrowGlyph(tile) {
       if (!tile || !tile.slope) return '↑';
 
-      const lowlandNeighbor = neighbors(tile.q, tile.r)
-        .map(n => game.map.get(key(n.q, n.r)))
-        .find(nt => nt && (nt.elevation || 0) < (tile.elevation || 0));
+      let lowlandNeighbor = null;
+      if (tile.slopeFrom && Number.isInteger(tile.slopeFrom.q) && Number.isInteger(tile.slopeFrom.r)) {
+        lowlandNeighbor = game.map.get(key(tile.slopeFrom.q, tile.slopeFrom.r)) || null;
+      }
+
+      if (!lowlandNeighbor) {
+        lowlandNeighbor = neighbors(tile.q, tile.r)
+          .map(n => game.map.get(key(n.q, n.r)))
+          .find(nt => nt && (nt.elevation || 0) < (tile.elevation || 0));
+      }
 
       if (!lowlandNeighbor) return '↑';
 
